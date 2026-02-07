@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>fphoto-renamer</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <header class="header">
+        <h1>fphoto-renamer</h1>
+        <p id="message" class="message"></p>
+      </header>
+
+      <section class="card">
+        <div id="jpgRow" class="row">
+          <label for="jpgInput">JPGフォルダ</label>
+          <div id="jpgDropZone" class="drop-input-wrap">
+            <input id="jpgInput" class="drop-target" type="text" placeholder="/path/to/jpg" />
+            <div class="drop-overlay">ここにドロップすると JPG フォルダに設定されます</div>
+          </div>
+          <button id="jpgBrowseBtn" type="button">選択</button>
+        </div>
+        <div id="rawRow" class="row">
+          <label for="rawInput">RAWフォルダ (任意)</label>
+          <div id="rawDropZone" class="drop-input-wrap">
+            <input id="rawInput" class="drop-target" type="text" placeholder="/path/to/raw" />
+            <div class="drop-overlay">ここにドロップすると RAW フォルダに設定されます</div>
+          </div>
+          <button id="rawBrowseBtn" type="button">選択</button>
+        </div>
+        <p class="drop-help">フォルダを入力欄へドラッグ＆ドロップして設定できます。</p>
+
+        <div class="row checks">
+          <label><input id="recursive" type="checkbox" /> 再帰走査</label>
+          <label><input id="includeHidden" type="checkbox" /> 隠しファイルを含む</label>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>書式テンプレート</h2>
+        <input id="templateInput" type="text" value="{date}_{camera_make}_{camera_model}_{lens_make}_{lens_model}_{film_sim}_{orig_name}" />
+        <div id="tokenButtons" class="token-buttons"></div>
+        <p id="templateError" class="error"></p>
+        <p id="sample" class="sample">出力サンプル: サンプル対象がありません</p>
+      </section>
+
+      <section class="card">
+        <h2>除外文字列</h2>
+        <div class="row inline">
+          <input id="excludeInput" type="text" placeholder="除外したい文字列" />
+          <button id="addExcludeBtn" type="button">追加</button>
+        </div>
+        <ul id="excludeList" class="exclude-list"></ul>
+      </section>
+
+      <section class="card">
+        <div class="actions">
+          <button id="previewBtn" type="button">プレビュー更新</button>
+          <button id="applyBtn" type="button" disabled>適用</button>
+          <button id="undoBtn" type="button">取り消し</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <p id="stats">件数: -</p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>元ファイル</th>
+                <th>新ファイル</th>
+                <th>source</th>
+              </tr>
+            </thead>
+            <tbody id="planRows"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

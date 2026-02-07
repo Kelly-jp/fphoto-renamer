@@ -1,0 +1,17 @@
+[package]
+name = "fphoto-renamer-gui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+build = "build.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tauri = { version = "2", features = [] }
+rfd = "0.15"
+fphoto_renamer_core = { path = "../../core" }
