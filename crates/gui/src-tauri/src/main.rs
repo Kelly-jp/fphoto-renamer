@@ -1,10 +1,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use chrono::{DateTime, Local, Utc};
 use fphoto_renamer_core::{
-    apply_plan, generate_plan, render_preview_sample, undo_last, validate_template, PlanOptions,
-    RenamePlan,
+    apply_plan, generate_plan, load_config, render_preview_sample, save_config, undo_last,
+    validate_template, AppConfig, MetadataSource, PhotoMetadata, PlanOptions, RenamePlan,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 #[derive(Debug, Deserialize)]
@@ -15,6 +16,8 @@ struct PlanRequest {
     recursive: bool,
     include_hidden: bool,
     template: String,
+    #[serde(default = "default_true")]
+    dedupe_same_make: bool,
     exclusions: Vec<String>,
     max_filename_len: Option<usize>,
 }
@@ -23,10 +26,40 @@ struct PlanRequest {
 #[serde(rename_all = "camelCase")]
 struct SampleRequest {
     template: String,
+    #[serde(default = "default_true")]
+    dedupe_same_make: bool,
     exclusions: Vec<String>,
     metadata: fphoto_renamer_core::PhotoMetadata,
     extension_with_dot: String,
     max_filename_len: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FixedSampleRequest {
+    template: String,
+    #[serde(default = "default_true")]
+    dedupe_same_make: bool,
+    exclusions: Vec<String>,
+    max_filename_len: Option<usize>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GuiSettingsResponse {
+    template: String,
+    exclusions: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveGuiSettingsRequest {
+    template: String,
+    exclusions: Vec<String>,
+}
+
+struct AppState {
+    launched_at_utc: DateTime<Utc>,
 }
 
 #[tauri::command]
@@ -37,6 +70,7 @@ fn generate_plan_cmd(request: PlanRequest) -> Result<RenamePlan, String> {
         recursive: request.recursive,
         include_hidden: request.include_hidden,
         template: request.template,
+        dedupe_same_maker: request.dedupe_same_make,
         exclusions: request.exclusions,
         max_filename_len: request.max_filename_len.unwrap_or(240),
     };
@@ -63,12 +97,47 @@ fn validate_template_cmd(template: String) -> Result<(), String> {
 fn render_sample_cmd(request: SampleRequest) -> Result<String, String> {
     render_preview_sample(
         &request.template,
+        request.dedupe_same_make,
         &request.exclusions,
         &request.metadata,
         &request.extension_with_dot,
         request.max_filename_len.unwrap_or(240),
     )
     .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn render_fixed_sample_cmd(
+    state: tauri::State<'_, AppState>,
+    request: FixedSampleRequest,
+) -> Result<String, String> {
+    let metadata = fixed_sample_metadata(state.launched_at_utc.with_timezone(&Local));
+    render_preview_sample(
+        &request.template,
+        request.dedupe_same_make,
+        &request.exclusions,
+        &metadata,
+        ".JPG",
+        request.max_filename_len.unwrap_or(240),
+    )
+    .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn load_gui_settings_cmd() -> Result<GuiSettingsResponse, String> {
+    let config = load_config().map_err(|err| err.to_string())?;
+    Ok(GuiSettingsResponse {
+        template: config.template,
+        exclusions: config.exclude_strings,
+    })
+}
+
+#[tauri::command]
+fn save_gui_settings_cmd(request: SaveGuiSettingsRequest) -> Result<(), String> {
+    let mut config = load_config().unwrap_or_else(|_| AppConfig::default());
+    config.template = request.template;
+    config.exclude_strings = request.exclusions;
+    save_config(&config).map_err(|err| err.to_string())
 }
 
 #[tauri::command]
@@ -114,15 +183,39 @@ fn normalize_to_folder_cmd(path: String) -> Result<String, String> {
 
 fn main() {
     tauri::Builder::default()
+        .manage(AppState {
+            launched_at_utc: Utc::now(),
+        })
         .invoke_handler(tauri::generate_handler![
             generate_plan_cmd,
             apply_plan_cmd,
             undo_last_cmd,
             validate_template_cmd,
             render_sample_cmd,
+            render_fixed_sample_cmd,
+            load_gui_settings_cmd,
+            save_gui_settings_cmd,
             pick_folder_cmd,
             normalize_to_folder_cmd
         ])
         .run(tauri::generate_context!())
         .expect("Tauriアプリの起動に失敗しました");
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn fixed_sample_metadata(launched_at: DateTime<Local>) -> PhotoMetadata {
+    PhotoMetadata {
+        source: MetadataSource::JpgExif,
+        date: launched_at,
+        camera_make: Some("FUJIFILM".to_string()),
+        camera_model: Some("X-H2".to_string()),
+        lens_make: Some("FUJIFILM".to_string()),
+        lens_model: Some("XF35mm F1.4 R".to_string()),
+        film_sim: Some("PROVIA".to_string()),
+        original_name: "DSC00001".to_string(),
+        jpg_path: PathBuf::from("DSC00001.JPG"),
+    }
 }

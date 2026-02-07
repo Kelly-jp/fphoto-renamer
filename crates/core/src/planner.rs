@@ -4,7 +4,7 @@ use crate::metadata::{MetadataSource, PartialMetadata, PhotoMetadata};
 use crate::sanitize::{
     apply_exclusions, cleanup_filename, sanitize_filename, truncate_filename_if_needed,
 };
-use crate::template::{parse_template, render_template};
+use crate::template::{parse_template, render_template_with_options};
 use crate::xmp_reader::read_xmp_metadata;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Local};
@@ -21,6 +21,7 @@ pub struct PlanOptions {
     pub recursive: bool,
     pub include_hidden: bool,
     pub template: String,
+    pub dedupe_same_maker: bool,
     pub exclusions: Vec<String>,
     pub max_filename_len: usize,
 }
@@ -32,7 +33,8 @@ impl Default for PlanOptions {
             raw_input: None,
             recursive: false,
             include_hidden: false,
-            template: "{date}_{camera_make}_{camera_model}_{lens_make}_{lens_model}_{film_sim}_{orig_name}".to_string(),
+            template: "{year}{month}{day}{hour}{minute}{second}_{camera_make}_{camera_model}_{lens_make}_{lens_model}_{film_sim}_{orig_name}".to_string(),
+            dedupe_same_maker: true,
             exclusions: Vec::new(),
             max_filename_len: 240,
         }
@@ -92,7 +94,7 @@ pub fn generate_plan(options: &PlanOptions) -> Result<RenamePlan> {
             options.recursive,
         )?;
 
-        let rendered = render_template(&parts, &metadata);
+        let rendered = render_template_with_options(&parts, &metadata, options.dedupe_same_maker);
         let excluded = apply_exclusions(rendered, &options.exclusions);
         let cleaned = cleanup_filename(&excluded);
         let sanitized = sanitize_filename(&cleaned);
@@ -138,13 +140,14 @@ pub fn generate_plan(options: &PlanOptions) -> Result<RenamePlan> {
 
 pub fn render_preview_sample(
     template: &str,
+    dedupe_same_maker: bool,
     exclusions: &[String],
     metadata: &PhotoMetadata,
     extension_with_dot: &str,
     max_filename_len: usize,
 ) -> Result<String> {
     let parts = parse_template(template)?;
-    let rendered = render_template(&parts, metadata);
+    let rendered = render_template_with_options(&parts, metadata, dedupe_same_maker);
     let excluded = apply_exclusions(rendered, exclusions);
     let cleaned = cleanup_filename(&excluded);
     let sanitized = sanitize_filename(&cleaned);

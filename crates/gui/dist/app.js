@@ -1,11 +1,16 @@
 const TOKENS = [
-  "{date}",
-  "{camera_make}",
-  "{camera_model}",
-  "{lens_make}",
-  "{lens_model}",
-  "{film_sim}",
-  "{orig_name}",
+  { token: "{year}", label: "年" },
+  { token: "{month}", label: "月" },
+  { token: "{day}", label: "日" },
+  { token: "{hour}", label: "時" },
+  { token: "{minute}", label: "分" },
+  { token: "{second}", label: "秒" },
+  { token: "{camera_make}", label: "カメラメーカー名" },
+  { token: "{camera_model}", label: "カメラ名" },
+  { token: "{lens_make}", label: "レンズメーカー名" },
+  { token: "{lens_model}", label: "レンズ名" },
+  { token: "{film_sim}", label: "フィルムシミュレーション名" },
+  { token: "{orig_name}", label: "元ファイル名" },
 ];
 
 const state = {
@@ -16,6 +21,7 @@ const state = {
   hoverField: null,
   lastDropPath: null,
   lastDropAt: 0,
+  saveTimer: null,
   unlistenFns: [],
 };
 
@@ -29,9 +35,8 @@ const el = {
   rawDropZone: document.getElementById("rawDropZone"),
   jpgBrowseBtn: document.getElementById("jpgBrowseBtn"),
   rawBrowseBtn: document.getElementById("rawBrowseBtn"),
-  recursive: document.getElementById("recursive"),
-  includeHidden: document.getElementById("includeHidden"),
   templateInput: document.getElementById("templateInput"),
+  dedupeSameMake: document.getElementById("dedupeSameMake"),
   tokenButtons: document.getElementById("tokenButtons"),
   templateError: document.getElementById("templateError"),
   sample: document.getElementById("sample"),
@@ -71,6 +76,43 @@ async function invokeCommand(cmd, payload = {}) {
   return invoke(cmd, payload);
 }
 
+async function loadPersistedSettings() {
+  try {
+    const settings = await invokeCommand("load_gui_settings_cmd");
+    if (settings && typeof settings.template === "string" && settings.template.trim()) {
+      el.templateInput.value = settings.template;
+    }
+    if (settings && Array.isArray(settings.exclusions)) {
+      state.exclusions = settings.exclusions
+        .filter((value) => typeof value === "string")
+        .map((value) => value.trim())
+        .filter((value) => value.length > 0);
+    }
+  } catch (error) {
+    setMessage(`設定読み込み失敗: ${toErrorMessage(error)}`, true);
+  }
+}
+
+async function persistSettings() {
+  await invokeCommand("save_gui_settings_cmd", {
+    request: {
+      template: el.templateInput.value,
+      exclusions: [...state.exclusions],
+    },
+  });
+}
+
+function schedulePersistSettings() {
+  if (state.saveTimer) {
+    clearTimeout(state.saveTimer);
+  }
+  state.saveTimer = setTimeout(() => {
+    persistSettings().catch((error) => {
+      setMessage(`設定保存失敗: ${toErrorMessage(error)}`, true);
+    });
+  }, 250);
+}
+
 function setMessage(text, isError = false) {
   el.message.textContent = text;
   el.message.style.color = isError ? "#dc2626" : "#0f5132";
@@ -86,15 +128,17 @@ function insertTokenAtCursor(token) {
   const cursor = start + token.length;
   input.setSelectionRange(cursor, cursor);
   input.focus();
+  schedulePersistSettings();
 }
 
 function renderTokenButtons() {
-  for (const token of TOKENS) {
+  for (const item of TOKENS) {
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.textContent = token;
+    btn.textContent = item.label;
+    btn.title = item.token;
     btn.addEventListener("click", async () => {
-      insertTokenAtCursor(token);
+      insertTokenAtCursor(item.token);
       await refreshSampleRealtime();
     });
     el.tokenButtons.appendChild(btn);
@@ -113,6 +157,7 @@ function renderExclusions() {
     removeBtn.addEventListener("click", async () => {
       state.exclusions.splice(idx, 1);
       renderExclusions();
+      schedulePersistSettings();
       await refreshSampleRealtime();
     });
     li.appendChild(text);
@@ -121,23 +166,14 @@ function renderExclusions() {
   });
 }
 
-function extensionFromPath(path) {
-  const slash = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
-  const file = slash >= 0 ? path.slice(slash + 1) : path;
-  const dot = file.lastIndexOf(".");
-  if (dot < 0) {
-    return "";
-  }
-  return file.slice(dot);
-}
-
 function toPlanRequest() {
   return {
     jpgInput: el.jpgInput.value.trim(),
     rawInput: el.rawInput.value.trim() || null,
-    recursive: el.recursive.checked,
-    includeHidden: el.includeHidden.checked,
+    recursive: false,
+    includeHidden: false,
     template: el.templateInput.value,
+    dedupeSameMake: el.dedupeSameMake.checked,
     exclusions: [...state.exclusions],
     maxFilenameLen: 240,
   };
@@ -189,22 +225,15 @@ async function refreshSampleRealtime() {
     return;
   }
 
-  const first = state.plan?.candidates?.[0];
-  if (!first) {
-    el.sample.textContent = "出力サンプル: サンプル対象がありません";
-    return;
-  }
-
   const request = {
     template: el.templateInput.value,
+    dedupeSameMake: el.dedupeSameMake.checked,
     exclusions: [...state.exclusions],
-    metadata: first.metadata,
-    extensionWithDot: extensionFromPath(first.original_path),
     maxFilenameLen: 240,
   };
 
   try {
-    const sample = await invokeCommand("render_sample_cmd", { request });
+    const sample = await invokeCommand("render_fixed_sample_cmd", { request });
     el.sample.textContent = `出力サンプル: ${sample}`;
   } catch (error) {
     el.sample.textContent = `出力サンプル: エラー (${toErrorMessage(error)})`;
@@ -720,6 +749,7 @@ function bindEvents() {
     state.exclusions.push(value);
     el.excludeInput.value = "";
     renderExclusions();
+    schedulePersistSettings();
     await refreshSampleRealtime();
   });
 
@@ -730,7 +760,11 @@ function bindEvents() {
   bindDropTarget(el.rawInput, "raw");
   bindWindowDomDropEvents();
 
-  el.templateInput.addEventListener("input", refreshSampleRealtime);
+  el.templateInput.addEventListener("input", () => {
+    schedulePersistSettings();
+    refreshSampleRealtime();
+  });
+  el.dedupeSameMake.addEventListener("change", refreshSampleRealtime);
   el.previewBtn.addEventListener("click", onPreview);
   el.applyBtn.addEventListener("click", onApply);
   el.undoBtn.addEventListener("click", onUndo);
@@ -738,8 +772,9 @@ function bindEvents() {
 
 async function init() {
   renderTokenButtons();
-  renderExclusions();
   bindEvents();
+  await loadPersistedSettings();
+  renderExclusions();
   await bindTauriDropEvents();
   await refreshSampleRealtime();
 }

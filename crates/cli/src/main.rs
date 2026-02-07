@@ -44,7 +44,7 @@ struct RenameArgs {
     apply: bool,
     #[arg(
         long,
-        default_value = "{date}_{camera_make}_{camera_model}_{lens_make}_{lens_model}_{film_sim}_{orig_name}"
+        default_value = "{year}{month}{day}{hour}{minute}{second}_{camera_make}_{camera_model}_{lens_make}_{lens_model}_{film_sim}_{orig_name}"
     )]
     template: String,
     #[arg(long)]
@@ -88,6 +88,7 @@ fn cmd_rename(args: RenameArgs) -> Result<()> {
         recursive: args.recursive,
         include_hidden: args.include_hidden,
         template: args.template,
+        dedupe_same_maker: true,
         exclusions: args.exclude,
         max_filename_len: 240,
     };

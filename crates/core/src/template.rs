@@ -12,6 +12,12 @@ pub enum TemplatePart {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Token {
     Date,
+    Year,
+    Month,
+    Day,
+    Hour,
+    Minute,
+    Second,
     CameraMake,
     CameraModel,
     LensMake,
@@ -83,18 +89,32 @@ pub fn parse_template(input: &str) -> Result<Vec<TemplatePart>, TemplateError> {
 }
 
 pub fn render_template(parts: &[TemplatePart], metadata: &PhotoMetadata) -> String {
+    render_template_with_options(parts, metadata, true)
+}
+
+pub fn render_template_with_options(
+    parts: &[TemplatePart],
+    metadata: &PhotoMetadata,
+    dedupe_same_maker: bool,
+) -> String {
     let same_maker = same_maker(
         metadata.normalized_camera_make(),
         metadata.normalized_lens_make(),
-    );
+    ) && dedupe_same_maker;
 
     let mut output = String::new();
     for part in parts {
         match part {
-            TemplatePart::Literal(s) => output.push_str(s),
+            TemplatePart::Literal(s) => output.push_str(&normalize_literal_connector(s)),
             TemplatePart::Token(token) => {
                 let value = match token {
                     Token::Date => format_date(metadata),
+                    Token::Year => format!("{:04}", metadata.date.year()),
+                    Token::Month => format!("{:02}", metadata.date.month()),
+                    Token::Day => format!("{:02}", metadata.date.day()),
+                    Token::Hour => format!("{:02}", metadata.date.hour()),
+                    Token::Minute => format!("{:02}", metadata.date.minute()),
+                    Token::Second => format!("{:02}", metadata.date.second()),
                     Token::CameraMake => metadata
                         .normalized_camera_make()
                         .unwrap_or_default()
@@ -129,7 +149,7 @@ pub fn render_template(parts: &[TemplatePart], metadata: &PhotoMetadata) -> Stri
                         .to_string(),
                     Token::OrigName => metadata.original_name.clone(),
                 };
-                output.push_str(&value);
+                output.push_str(&normalize_token_value(&value));
             }
         }
     }
@@ -140,6 +160,12 @@ pub fn render_template(parts: &[TemplatePart], metadata: &PhotoMetadata) -> Stri
 fn parse_token(token: &str) -> Result<Token, TemplateError> {
     match token {
         "date" => Ok(Token::Date),
+        "year" => Ok(Token::Year),
+        "month" => Ok(Token::Month),
+        "day" => Ok(Token::Day),
+        "hour" => Ok(Token::Hour),
+        "minute" => Ok(Token::Minute),
+        "second" => Ok(Token::Second),
         "camera_make" => Ok(Token::CameraMake),
         "camera_model" => Ok(Token::CameraModel),
         "lens_make" => Ok(Token::LensMake),
@@ -168,6 +194,23 @@ fn format_date(metadata: &PhotoMetadata) -> String {
         d.minute(),
         d.second()
     )
+}
+
+fn normalize_literal_connector(input: &str) -> String {
+    input
+        .chars()
+        .map(|ch| {
+            if ch.is_whitespace() || ch == '-' {
+                '_'
+            } else {
+                ch
+            }
+        })
+        .collect()
+}
+
+fn normalize_token_value(input: &str) -> String {
+    input.split_whitespace().collect::<Vec<_>>().join("-")
 }
 
 #[cfg(test)]
@@ -212,7 +255,41 @@ mod tests {
     #[test]
     fn render_dedupes_lens_maker() {
         let parsed = parse_template("{camera_make}_{lens_make}_{lens_model}").expect("must parse");
-        let rendered = render_template(&parsed, &metadata());
+        let rendered = render_template_with_options(&parsed, &metadata(), true);
         assert_eq!(rendered, "FUJIFILM__XF33mmF1.4");
+    }
+
+    #[test]
+    fn render_keeps_lens_maker_when_dedupe_off() {
+        let parsed = parse_template("{camera_make}_{lens_make}_{lens_model}").expect("must parse");
+        let rendered = render_template_with_options(&parsed, &metadata(), false);
+        assert_eq!(rendered, "FUJIFILM_fujifilm_XF33mmF1.4");
+    }
+
+    #[test]
+    fn render_replaces_spaces_inside_tokens_with_hyphen() {
+        let mut m = metadata();
+        m.lens_model = Some("XF35mm F1.4 R".to_string());
+        m.film_sim = Some("Classic Chrome".to_string());
+        let parsed = parse_template("{lens_model}_{film_sim}").expect("must parse");
+        let rendered = render_template_with_options(&parsed, &m, true);
+        assert_eq!(rendered, "XF35mm-F1.4-R_Classic-Chrome");
+    }
+
+    #[test]
+    fn render_normalizes_literal_separator_to_underscore() {
+        let parsed = parse_template("{date} - {orig_name}").expect("must parse");
+        let rendered = render_template_with_options(&parsed, &metadata(), true);
+        assert!(rendered.contains("_"));
+        assert!(!rendered.contains(" - "));
+    }
+
+    #[test]
+    fn render_supports_split_date_tokens() {
+        let parsed = parse_template("{year}{month}{day}{hour}{minute}{second}_{orig_name}")
+            .expect("must parse");
+        let rendered = render_template_with_options(&parsed, &metadata(), true);
+        assert!(rendered.ends_with("_IMG_0001"));
+        assert_eq!(rendered.len(), 14 + "_IMG_0001".len());
     }
 }

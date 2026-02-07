@@ -71,7 +71,7 @@ Windows (PowerShell) の例:
 - JPG フォルダ必須、RAW フォルダ任意
 - メタデータ取得優先順位: `XMP -> RAW EXIF -> JPG EXIF`
 - 日付フォーマット: `YYYYMMDDHHMMSS`
-- テンプレート入力: 例 `"{date}_{camera_model}_{orig_name}"`
+- テンプレート入力: 例 `"{year}{month}{day}{hour}{minute}{second}_{camera_model}_{orig_name}"`
 - `{camera_make}` と `{lens_make}` が同じ場合は `{lens_make}` を空扱い
 - 除外文字列リスト（大文字小文字非区別）
 - Windows/macOS 禁止文字の正規化
@@ -84,7 +84,7 @@ Windows (PowerShell) の例:
 cargo run -p fphoto-renamer-cli -- rename \
   --jpg-input /path/to/jpg \
   --raw-input /path/to/raw \
-  --template "{date}_{camera_model}_{orig_name}" \
+  --template "{year}{month}{day}{hour}{minute}{second}_{camera_model}_{orig_name}" \
   --exclude "FUJIFILM"
 ```
 

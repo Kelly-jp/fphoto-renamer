@@ -31,17 +31,16 @@
           <button id="rawBrowseBtn" type="button">選択</button>
         </div>
         <p class="drop-help">フォルダを入力欄へドラッグ＆ドロップして設定できます。</p>
-
-        <div class="row checks">
-          <label><input id="recursive" type="checkbox" /> 再帰走査</label>
-          <label><input id="includeHidden" type="checkbox" /> 隠しファイルを含む</label>
-        </div>
       </section>
 
       <section class="card">
         <h2>書式テンプレート</h2>
-        <input id="templateInput" type="text" value="{date}_{camera_make}_{camera_model}_{lens_make}_{lens_model}_{film_sim}_{orig_name}" />
+        <input id="templateInput" type="text" value="{year}{month}{day}{hour}{minute}{second}_{camera_make}_{camera_model}_{lens_make}_{lens_model}_{film_sim}_{orig_name}" />
         <div id="tokenButtons" class="token-buttons"></div>
+        <label class="inline-check">
+          <input id="dedupeSameMake" type="checkbox" checked />
+          カメラメーカー名とレンズメーカー名が同じ場合は1つだけ出力する
+        </label>
         <p id="templateError" class="error"></p>
         <p id="sample" class="sample">出力サンプル: サンプル対象がありません</p>
       </section>

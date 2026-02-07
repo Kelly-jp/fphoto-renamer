@@ -1143,6 +1143,7 @@ name = "fphoto-renamer-gui"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "fphoto_renamer_core",
  "rfd",
  "serde",

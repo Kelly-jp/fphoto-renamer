@@ -15,5 +15,6 @@ pub use planner::{
     generate_plan, render_preview_sample, PlanOptions, RenameCandidate, RenamePlan, RenameStats,
 };
 pub use template::{
-    parse_template, render_template, validate_template, TemplateError, TemplatePart,
+    parse_template, render_template, render_template_with_options, validate_template,
+    TemplateError, TemplatePart,
 };
