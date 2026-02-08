@@ -310,6 +310,7 @@ function buildUndoLogEntriesFromPlan(plan) {
 }
 
 function renderEmptyConvertLog() {
+  el.convertLog.innerHTML = "";
   const empty = document.createElement("li");
   empty.className = "empty";
   empty.textContent = "まだ変換ログはありません";
@@ -420,7 +421,11 @@ async function onApply() {
     });
     renderConvertLogEntries(buildLogEntriesFromPlan(plan, "✅"));
     setMessage(`変換完了: ${result.applied}件`, false);
-    setUndoButtonEnabled(result.applied > 0);
+    const appliedCount = Number(result.applied) || 0;
+    const changedCount = Array.isArray(plan?.candidates)
+      ? plan.candidates.filter((row) => row.changed).length
+      : 0;
+    setUndoButtonEnabled(appliedCount > 0 || changedCount > 0);
   } catch (error) {
     if (plan) {
       renderConvertLogEntries(buildLogEntriesFromPlan(plan, "❌"));
@@ -798,6 +803,7 @@ async function onBrowse(field) {
 }
 
 async function clearFolder(field) {
+  renderEmptyConvertLog();
   const input = targetInputByField(field);
   if (!input.value.trim()) {
     return;
@@ -1115,6 +1121,7 @@ function bindEvents() {
 async function init() {
   renderTokenButtons();
   bindEvents();
+  setUndoButtonEnabled(false);
   await loadPersistedSettings();
   sanitizeTemplateInputInPlace();
   renderExclusions();

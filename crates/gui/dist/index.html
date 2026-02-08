@@ -7,81 +7,106 @@
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <main class="container">
-      <header class="header">
-        <h1>fphoto-renamer</h1>
-      </header>
+    <main class="window">
+      <section class="workspace">
+        <aside class="column left-column">
+          <section class="card">
+            <h2>入力フォルダ</h2>
 
-      <section class="card">
-        <div id="jpgRow" class="row">
-          <label for="jpgInput">JPGフォルダ</label>
-          <div id="jpgDropZone" class="drop-input-wrap">
-            <input id="jpgInput" class="drop-target" type="text" placeholder="JPGフォルダを選択もしくはドラッグ&ドロップ" />
-            <div class="drop-overlay">ここにドロップすると JPG フォルダに設定されます</div>
-          </div>
-          <div class="folder-actions">
-            <button id="jpgBrowseBtn" type="button">選択</button>
-            <button id="jpgClearBtn" type="button">クリア</button>
-          </div>
-        </div>
-        <div id="rawRow" class="row">
-          <label for="rawInput">RAWフォルダ (任意)</label>
-          <div id="rawDropZone" class="drop-input-wrap">
-            <input id="rawInput" class="drop-target" type="text" placeholder="RAWフォルダを選択もしくはドラッグ&ドロップ" />
-            <div class="drop-overlay">ここにドロップすると RAW フォルダに設定されます</div>
-          </div>
-          <div class="folder-actions">
-            <button id="rawBrowseBtn" type="button">選択</button>
-            <button id="rawClearBtn" type="button">クリア</button>
-          </div>
-        </div>
-        <label class="inline-check">
-          <input id="rawParentIfMissing" type="checkbox" />
-          RAWフォルダ未指定時はJPGフォルダの1つ上の階層をRAW探索ルートとして扱う
-        </label>
-      </section>
+            <div class="field-group">
+              <label for="jpgInput">JPGフォルダ</label>
+              <div class="path-row">
+                <div id="jpgDropZone" class="drop-input-wrap">
+                  <input
+                    id="jpgInput"
+                    class="drop-target"
+                    type="text"
+                    placeholder="選択もしくはドラッグ&ドロップ"
+                  />
+                  <div class="drop-overlay">ここにドロップ</div>
+                </div>
+                <button id="jpgBrowseBtn" type="button">選択</button>
+                <button id="jpgClearBtn" type="button">クリア</button>
+              </div>
+            </div>
 
-      <section class="card">
-        <h2>書式テンプレート</h2>
-        <div class="row inline template-row">
-          <input id="templateInput" type="text" value="{year}{month}{day}_{hour}{minute}{second}_{camera_maker}_{camera_model}_{lens_maker}_{lens_model}_{film_sim}_{orig_name}" />
-          <button id="resetTemplateBtn" type="button">デフォルトに戻す</button>
-        </div>
-        <div id="tokenButtons" class="token-buttons"></div>
-        <label class="inline-check">
-          <input id="dedupeSameMake" type="checkbox" checked />
-          カメラメーカー名とレンズメーカー名が同じ場合は1つだけ出力する
-        </label>
-        <label class="inline-check">
-          <input id="backupOriginals" type="checkbox" />
-          適用時に元ファイルを backup フォルダへバックアップする
-        </label>
-        <p id="templateError" class="error"></p>
-        <p id="sample" class="sample">出力サンプル: サンプル対象がありません</p>
-      </section>
+            <div class="field-group">
+              <label for="rawInput">RAWフォルダ (任意)</label>
+              <div class="path-row">
+                <div id="rawDropZone" class="drop-input-wrap">
+                  <input
+                    id="rawInput"
+                    class="drop-target"
+                    type="text"
+                    placeholder="選択もしくはドラッグ&ドロップ"
+                  />
+                  <div class="drop-overlay">ここにドロップ</div>
+                </div>
+                <button id="rawBrowseBtn" type="button">選択</button>
+                <button id="rawClearBtn" type="button">クリア</button>
+              </div>
+            </div>
 
-      <section class="card">
-        <h2>削除文字列</h2>
-        <div class="row inline">
-          <input id="excludeInput" type="text" placeholder="削除したい文字列" />
-          <button id="addExcludeBtn" type="button">追加</button>
-        </div>
-        <ul id="excludeList" class="exclude-list"></ul>
-      </section>
+            <label class="plain-check">
+              <input id="rawParentIfMissing" type="checkbox" />
+              RAWフォルダ未指定時はJPGフォルダの1つ上の階層をRAW探索ルートとして扱う
+            </label>
+            <label class="plain-check">
+              <input id="backupOriginals" type="checkbox" />
+              変換時に元ファイルを backup フォルダへバックアップする
+            </label>
+          </section>
 
-      <section class="card">
-        <div class="actions">
-          <button id="applyBtn" type="button" disabled>変換</button>
-          <button id="undoBtn" type="button" disabled>元に戻す</button>
-        </div>
-        <p id="actionMessage" class="action-message"></p>
-      </section>
+          <section class="card delete-card">
+            <h2>削除文字列</h2>
+            <div class="delete-input-row">
+              <input id="excludeInput" type="text" placeholder="削除したい文字列" />
+              <button id="addExcludeBtn" type="button">追加</button>
+            </div>
+            <ul id="excludeList" class="exclude-list"></ul>
+          </section>
+        </aside>
 
-      <section class="card">
-        <h2>変換ログ</h2>
-        <ul id="convertLog" class="convert-log">
-          <li class="empty">まだ変換ログはありません</li>
-        </ul>
+        <section class="column center-column">
+          <section class="card">
+            <h2>書式テンプレート / 出力サンプル</h2>
+
+            <div class="template-top-row">
+              <input
+                id="templateInput"
+                type="text"
+                value="{year}{month}{day}_{hour}{minute}{second}_{camera_maker}_{camera_model}_{lens_maker}_{lens_model}_{film_sim}_{orig_name}"
+              />
+              <button id="resetTemplateBtn" type="button">デフォルトに戻す</button>
+            </div>
+
+            <div id="tokenButtons" class="token-buttons"></div>
+
+            <label class="plain-check">
+              <input id="dedupeSameMake" type="checkbox" checked />
+              カメラメーカー名とレンズメーカー名が同じ場合は1つだけ出力する
+            </label>
+
+            <p id="templateError" class="error"></p>
+            <p class="sample-label">出力サンプル</p>
+            <p id="sample" class="sample">出力サンプル: サンプル対象がありません</p>
+          </section>
+
+          <section class="card log-card">
+            <h2>変換ログ</h2>
+            <ul id="convertLog" class="convert-log">
+              <li class="empty">まだ変換ログはありません</li>
+            </ul>
+          </section>
+
+          <section class="card action-card">
+            <div class="actions">
+              <button id="undoBtn" type="button" class="action-btn">元に戻す</button>
+              <button id="applyBtn" type="button" class="action-btn primary" disabled>変換</button>
+            </div>
+            <p id="actionMessage" class="action-message"></p>
+          </section>
+        </section>
       </section>
     </main>
 
