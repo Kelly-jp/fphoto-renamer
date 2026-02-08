@@ -1,0 +1,75 @@
+name: Build Installers
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-installer:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            bundle: dmg
+            ext: dmg
+            artifact_name: installer-macos-dmg
+          - os: windows-latest
+            bundle: msi
+            ext: msi
+            artifact_name: installer-windows-msi
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install WiX Toolset (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: choco install wixtoolset --no-progress -y
+
+      - name: Install tauri-cli
+        shell: bash
+        run: |
+          if ! cargo tauri --version >/dev/null 2>&1; then
+            cargo install tauri-cli --locked --version "^2.0"
+          fi
+
+      - name: Build installer
+        shell: bash
+        run: |
+          cd crates/gui/src-tauri
+          cargo tauri build \
+            --bundles "${{ matrix.bundle }}" \
+            --config '{"bundle":{"active":true}}'
+
+      - name: Collect installer artifacts
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          find . -type f \
+            -path "*/target/release/bundle/${{ matrix.bundle }}/*.${{ matrix.ext }}" \
+            -exec cp {} artifacts/ \;
+
+          if [ -z "$(ls -A artifacts 2>/dev/null)" ]; then
+            echo "Installer artifact not found."
+            exit 1
+          fi
+
+          ls -la artifacts
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: artifacts/*.${{ matrix.ext }}
+          if-no-files-found: error
