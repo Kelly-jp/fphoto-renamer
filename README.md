@@ -11,6 +11,9 @@ macOS/Windows 向けの JPG リネームツールです。CLI と Tauri GUI は�
 - GUI 実行時:
   - macOS: WebKit が利用可能な通常環境
   - Windows: WebView2 Runtime が利用可能な環境
+- EXIF 取得は `exiftool`（`-stay_open`）優先
+  - 同梱しない場合: `exiftool` を PATH にインストール
+  - 同梱する場合: `crates/gui/src-tauri/resources/bin/<os>/` に配置
 
 ### Debug ビルド
 
@@ -110,3 +113,9 @@ cargo run -p fphoto-renamer-gui
 GUI では書式テキストを入力し、トークンボタンでカーソル位置へ挿入できます。
 出力サンプルはリアルタイム表示されます。
 GUI は Tauri + HTML/CSS/JavaScript で実装しています。
+
+## ExifTool の指定
+
+- 環境変数 `FPHOTO_EXIFTOOL_PATH` を設定すると、その実行ファイルを優先使用します。
+- GUI では同梱リソースを自動探索し、見つかった場合に `FPHOTO_EXIFTOOL_PATH` を自動設定します。
+- 同梱も PATH も見つからない場合は、`kamadak-exif` にフォールバックします。

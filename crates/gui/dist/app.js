@@ -94,6 +94,9 @@ async function loadPersistedSettings() {
         .map((value) => value.trim())
         .filter((value) => value.length > 0);
     }
+    if (settings && typeof settings.backupOriginals === "boolean") {
+      el.backupOriginals.checked = settings.backupOriginals;
+    }
   } catch (error) {
     setMessage(`設定読み込み失敗: ${toErrorMessage(error)}`, true);
   }
@@ -104,6 +107,7 @@ async function persistSettings() {
     request: {
       template: el.templateInput.value,
       exclusions: [...state.exclusions],
+      backupOriginals: el.backupOriginals.checked,
     },
   });
 }
@@ -872,6 +876,7 @@ function bindEvents() {
     await refreshSampleRealtime();
     await refreshPreviewOnTemplateChange();
   });
+  el.backupOriginals.addEventListener("change", schedulePersistSettings);
   el.dedupeSameMake.addEventListener("change", refreshSampleRealtime);
   el.previewBtn.addEventListener("click", onPreview);
   el.applyBtn.addEventListener("click", onApply);

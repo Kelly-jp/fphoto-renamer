@@ -8,6 +8,8 @@ use fphoto_renamer_core::{
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use tauri::path::BaseDirectory;
+use tauri::Manager;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -50,6 +52,7 @@ struct FixedSampleRequest {
 struct GuiSettingsResponse {
     template: String,
     exclusions: Vec<String>,
+    backup_originals: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -57,6 +60,8 @@ struct GuiSettingsResponse {
 struct SaveGuiSettingsRequest {
     template: String,
     exclusions: Vec<String>,
+    #[serde(default)]
+    backup_originals: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -141,6 +146,7 @@ fn load_gui_settings_cmd() -> Result<GuiSettingsResponse, String> {
     Ok(GuiSettingsResponse {
         template: config.template,
         exclusions: config.exclude_strings,
+        backup_originals: config.backup_originals,
     })
 }
 
@@ -149,6 +155,7 @@ fn save_gui_settings_cmd(request: SaveGuiSettingsRequest) -> Result<(), String> 
     let mut config = load_config().unwrap_or_else(|_| AppConfig::default());
     config.template = request.template;
     config.exclude_strings = request.exclusions;
+    config.backup_originals = request.backup_originals;
     save_config(&config).map_err(|err| err.to_string())
 }
 
@@ -198,6 +205,10 @@ fn main() {
         .manage(AppState {
             launched_at_utc: Utc::now(),
         })
+        .setup(|app| {
+            configure_exiftool_path(app.handle());
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             generate_plan_cmd,
             apply_plan_cmd,
@@ -212,6 +223,53 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("Tauriアプリの起動に失敗しました");
+}
+
+fn configure_exiftool_path<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    if std::env::var_os("FPHOTO_EXIFTOOL_PATH").is_some() {
+        return;
+    }
+
+    let mut candidates = Vec::<PathBuf>::new();
+
+    if let Ok(path) = app
+        .path()
+        .resolve(resource_rel_path(), BaseDirectory::Resource)
+    {
+        candidates.push(path);
+    }
+
+    let dev_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(resource_rel_path());
+    candidates.push(dev_path);
+
+    for candidate in candidates {
+        if candidate.exists() {
+            std::env::set_var("FPHOTO_EXIFTOOL_PATH", candidate);
+            return;
+        }
+    }
+}
+
+fn resource_rel_path() -> &'static str {
+    #[cfg(target_os = "windows")]
+    {
+        return "resources/bin/windows/exiftool.exe";
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        return "resources/bin/macos/exiftool";
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        return "resources/bin/linux/exiftool";
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    {
+        return "resources/bin/exiftool";
+    }
 }
 
 fn default_true() -> bool {

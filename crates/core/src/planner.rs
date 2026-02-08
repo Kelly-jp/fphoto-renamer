@@ -227,6 +227,7 @@ fn resolve_metadata(
         .file_stem()
         .map(|v| v.to_string_lossy().to_string())
         .unwrap_or_else(|| "untitled".to_string());
+    let jpg_exif_meta = read_exif_metadata(jpg_path).ok();
 
     if let Some(raw_root) = raw_root {
         if let Some(raw_path) = find_matching_raw(jpg_root, raw_root, jpg_path, recursive) {
@@ -248,8 +249,9 @@ fn resolve_metadata(
                             }
                         }
 
+                        let merged = merge_with_jpg_fallback(xmp_meta, jpg_exif_meta.as_ref());
                         return Ok(to_photo_metadata(
-                            xmp_meta,
+                            merged,
                             source,
                             fallback_date,
                             original_name,
@@ -258,8 +260,10 @@ fn resolve_metadata(
                     }
                     Err(_) => {
                         if let Some(raw) = raw_exif.as_ref() {
+                            let merged =
+                                merge_with_jpg_fallback(raw.clone(), jpg_exif_meta.as_ref());
                             return Ok(to_photo_metadata(
-                                raw.clone(),
+                                merged,
                                 MetadataSource::RawExif,
                                 fallback_date,
                                 original_name,
@@ -271,8 +275,9 @@ fn resolve_metadata(
             }
 
             if let Some(raw) = raw_exif {
+                let merged = merge_with_jpg_fallback(raw, jpg_exif_meta.as_ref());
                 return Ok(to_photo_metadata(
-                    raw,
+                    merged,
                     MetadataSource::RawExif,
                     fallback_date,
                     original_name,
@@ -282,7 +287,7 @@ fn resolve_metadata(
         }
     }
 
-    let jpg_meta = read_exif_metadata(jpg_path).unwrap_or_default();
+    let jpg_meta = jpg_exif_meta.unwrap_or_default();
     Ok(to_photo_metadata(
         jpg_meta,
         MetadataSource::JpgExif,
@@ -357,6 +362,16 @@ fn resolve_collision(
     }
 }
 
+fn merge_with_jpg_fallback(
+    mut base: PartialMetadata,
+    jpg_exif_meta: Option<&PartialMetadata>,
+) -> PartialMetadata {
+    if let Some(jpg_meta) = jpg_exif_meta {
+        base.merge_missing_from(jpg_meta);
+    }
+    base
+}
+
 fn is_available(candidate: &Path, original_path: &Path, planned_paths: &HashSet<PathBuf>) -> bool {
     if planned_paths.contains(candidate) {
         return false;
@@ -385,4 +400,58 @@ fn is_hidden(path: &Path) -> bool {
 fn file_modified_to_local(path: &Path) -> Option<DateTime<Local>> {
     let time = fs::metadata(path).ok()?.modified().ok()?;
     Some(DateTime::from(time))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::merge_with_jpg_fallback;
+    use crate::metadata::PartialMetadata;
+
+    #[test]
+    fn merge_with_jpg_fallback_fills_missing_fields() {
+        let base = PartialMetadata {
+            camera_make: None,
+            camera_model: None,
+            lens_make: None,
+            lens_model: None,
+            ..Default::default()
+        };
+        let jpg = PartialMetadata {
+            camera_make: Some("FUJIFILM".to_string()),
+            camera_model: Some("X-H2".to_string()),
+            lens_make: Some("FUJIFILM".to_string()),
+            lens_model: Some("XF35mm F1.4 R".to_string()),
+            ..Default::default()
+        };
+
+        let merged = merge_with_jpg_fallback(base, Some(&jpg));
+        assert_eq!(merged.camera_make.as_deref(), Some("FUJIFILM"));
+        assert_eq!(merged.camera_model.as_deref(), Some("X-H2"));
+        assert_eq!(merged.lens_make.as_deref(), Some("FUJIFILM"));
+        assert_eq!(merged.lens_model.as_deref(), Some("XF35mm F1.4 R"));
+    }
+
+    #[test]
+    fn merge_with_jpg_fallback_keeps_existing_values() {
+        let base = PartialMetadata {
+            camera_make: Some("SONY".to_string()),
+            camera_model: Some("A7C".to_string()),
+            lens_make: Some("SIGMA".to_string()),
+            lens_model: Some("35mm F2 DG DN".to_string()),
+            ..Default::default()
+        };
+        let jpg = PartialMetadata {
+            camera_make: Some("FUJIFILM".to_string()),
+            camera_model: Some("X-H2".to_string()),
+            lens_make: Some("FUJIFILM".to_string()),
+            lens_model: Some("XF35mm F1.4 R".to_string()),
+            ..Default::default()
+        };
+
+        let merged = merge_with_jpg_fallback(base, Some(&jpg));
+        assert_eq!(merged.camera_make.as_deref(), Some("SONY"));
+        assert_eq!(merged.camera_model.as_deref(), Some("A7C"));
+        assert_eq!(merged.lens_make.as_deref(), Some("SIGMA"));
+        assert_eq!(merged.lens_model.as_deref(), Some("35mm F2 DG DN"));
+    }
 }

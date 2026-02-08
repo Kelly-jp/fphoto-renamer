@@ -13,6 +13,8 @@ pub struct AppConfig {
     pub language: String,
     pub template: String,
     pub exclude_strings: Vec<String>,
+    #[serde(default)]
+    pub backup_originals: bool,
 }
 
 impl Default for AppConfig {
@@ -24,6 +26,7 @@ impl Default for AppConfig {
             language: "ja".to_string(),
             template: DEFAULT_TEMPLATE.to_string(),
             exclude_strings: Vec::new(),
+            backup_originals: false,
         }
     }
 }

@@ -23,6 +23,12 @@
   },
   "bundle": {
     "active": false,
-    "targets": "all"
+    "targets": "all",
+    "resources": [
+      "resources/bin/macos/*",
+      "resources/bin/windows/*",
+      "resources/bin/linux/*",
+      "resources/LICENSES/*"
+    ]
   }
 }
