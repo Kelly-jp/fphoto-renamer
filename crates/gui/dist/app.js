@@ -21,6 +21,7 @@ const state = {
   hoverField: null,
   lastDropPath: null,
   lastDropAt: 0,
+  recentlyAppliedNames: new Set(),
   saveTimer: null,
   unlistenFns: [],
 };
@@ -181,17 +182,31 @@ function toPlanRequest() {
 
 function renderPlan(plan) {
   el.planRows.innerHTML = "";
+  let updatedCount = 0;
+  let skippedCount = 0;
+  let errorCount = 0;
+
   for (const row of plan.candidates) {
+    const originalName = basename(row.original_path);
+    const targetName = basename(row.target_path);
+    const status = rowStatus(row, originalName);
+    if (status === "更新済み") {
+      updatedCount += 1;
+    } else if (status.startsWith("スキップ")) {
+      skippedCount += 1;
+    } else if (status.startsWith("エラー")) {
+      errorCount += 1;
+    }
     const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td>${escapeHtml(row.original_path)}</td>
-      <td>${escapeHtml(row.target_path)}</td>
-      <td>${escapeHtml(String(row.metadata_source))}</td>
+      <td>${escapeHtml(originalName)}</td>
+      <td>${escapeHtml(targetName)}</td>
+      <td>${escapeHtml(status)}</td>
     `;
     el.planRows.appendChild(tr);
   }
 
-  el.stats.textContent = `件数: scanned=${plan.stats.scanned_files} jpg=${plan.stats.jpg_files} skip_non_jpg=${plan.stats.skipped_non_jpg} skip_hidden=${plan.stats.skipped_hidden} planned=${plan.stats.planned} unchanged=${plan.stats.unchanged}`;
+  el.stats.textContent = `件数: 全件数=${plan.candidates.length} 更新済み=${updatedCount} スキップ=${skippedCount} エラー=${errorCount}`;
 }
 
 function escapeHtml(value) {
@@ -201,6 +216,34 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function basename(path) {
+  if (typeof path !== "string") {
+    return "";
+  }
+  const normalized = path.replaceAll("\\\\", "/");
+  const index = normalized.lastIndexOf("/");
+  return index >= 0 ? normalized.slice(index + 1) : normalized;
+}
+
+function rowStatus(row, originalName) {
+  const errorMessage =
+    typeof row.error_message === "string"
+      ? row.error_message
+      : typeof row.error === "string"
+        ? row.error
+        : "";
+  if (errorMessage) {
+    return `エラー: ${errorMessage}`;
+  }
+  if (state.recentlyAppliedNames.has(originalName)) {
+    return "更新済み";
+  }
+  if (row.changed) {
+    return "更新予定";
+  }
+  return "スキップ(同名)";
 }
 
 async function validateTemplate() {
@@ -244,10 +287,14 @@ function updateApplyButton() {
   el.applyBtn.disabled = !(state.templateValid && state.plan);
 }
 
-async function updatePlan() {
+async function updatePlan(reason = "preview") {
   const request = toPlanRequest();
   if (!request.jpgInput) {
     throw new Error("JPGフォルダを入力してください");
+  }
+
+  if (reason !== "after_apply") {
+    state.recentlyAppliedNames.clear();
   }
 
   const plan = await invokeCommand("generate_plan_cmd", { request });
@@ -259,7 +306,7 @@ async function updatePlan() {
 
 async function onPreview() {
   try {
-    await updatePlan();
+    await updatePlan("preview");
     setMessage("プレビューを更新しました", false);
   } catch (error) {
     setMessage(`プレビュー生成失敗: ${toErrorMessage(error)}`, true);
@@ -276,10 +323,16 @@ async function onApply() {
       throw new Error("先にプレビューを生成してください");
     }
 
+    const appliedNames = state.plan.candidates
+      .filter((row) => row.changed)
+      .map((row) => basename(row.target_path));
+    state.recentlyAppliedNames = new Set(appliedNames);
+
     const result = await invokeCommand("apply_plan_cmd", { plan: state.plan });
     setMessage(`適用完了: ${result.applied}件`, false);
-    await updatePlan();
+    await updatePlan("after_apply");
   } catch (error) {
+    state.recentlyAppliedNames.clear();
     setMessage(`適用失敗: ${toErrorMessage(error)}`, true);
   }
 }
@@ -289,10 +342,25 @@ async function onUndo() {
     const result = await invokeCommand("undo_last_cmd");
     setMessage(`取り消し完了: ${result.restored}件`, false);
     if (el.jpgInput.value.trim()) {
-      await updatePlan();
+      await updatePlan("preview");
     }
   } catch (error) {
     setMessage(`取り消し失敗: ${toErrorMessage(error)}`, true);
+  }
+}
+
+async function refreshPreviewIfJpgSelected(field) {
+  if (field !== "jpg") {
+    return;
+  }
+  if (!el.jpgInput.value.trim()) {
+    return;
+  }
+  try {
+    await updatePlan("preview");
+    setMessage("JPGフォルダを設定しプレビューを更新しました", false);
+  } catch (error) {
+    setMessage(`プレビュー生成失敗: ${toErrorMessage(error)}`, true);
   }
 }
 
@@ -522,6 +590,7 @@ async function setFolderPathToField(rawPath, field) {
     input.value = folderPath;
     state.activeDropField = field;
     setMessage(`${field === "jpg" ? "JPG" : "RAW"}フォルダを設定しました`, false);
+    await refreshPreviewIfJpgSelected(field);
   } catch (error) {
     setMessage(`フォルダ設定失敗: ${toErrorMessage(error)}`, true);
   }
@@ -539,6 +608,7 @@ async function onBrowse(field) {
     input.value = selected;
     state.activeDropField = field;
     setMessage(`${field === "jpg" ? "JPG" : "RAW"}フォルダを設定しました`, false);
+    await refreshPreviewIfJpgSelected(field);
   } catch (error) {
     setMessage(`フォルダ選択失敗: ${toErrorMessage(error)}`, true);
   }
