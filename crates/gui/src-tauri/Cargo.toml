@@ -13,6 +13,6 @@ anyhow.workspace = true
 chrono.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["image-png"] }
 rfd = "0.15"
 fphoto_renamer_core = { path = "../../core" }

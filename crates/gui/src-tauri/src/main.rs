@@ -8,8 +8,13 @@ use fphoto_renamer_core::{
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+#[cfg(target_os = "macos")]
+use tauri::menu::{AboutMetadata, Menu, PredefinedMenuItem, Submenu};
 use tauri::path::BaseDirectory;
 use tauri::Manager;
+
+#[cfg(target_os = "macos")]
+const DEFAULT_ABOUT_COPYRIGHT: &str = "Copyright (c) 2026 Kelly-jp. All rights reserved.";
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -215,6 +220,8 @@ fn main() {
         })
         .setup(|app| {
             configure_exiftool_path(app.handle());
+            #[cfg(target_os = "macos")]
+            configure_macos_menu(app.handle())?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -256,6 +263,99 @@ fn configure_exiftool_path<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
             return;
         }
     }
+}
+
+#[cfg(target_os = "macos")]
+fn configure_macos_menu<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<()> {
+    let pkg_info = app.package_info();
+    let config = app.config();
+    let copyright = config
+        .bundle
+        .copyright
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| DEFAULT_ABOUT_COPYRIGHT.to_string());
+
+    let about_metadata = AboutMetadata {
+        name: Some(pkg_info.name.clone()),
+        version: Some(pkg_info.version.to_string()),
+        copyright: Some(copyright),
+        authors: config
+            .bundle
+            .publisher
+            .clone()
+            .map(|publisher| vec![publisher]),
+        icon: load_about_icon().or_else(|| app.default_window_icon().cloned()),
+        ..Default::default()
+    };
+
+    let menu = Menu::with_items(
+        app,
+        &[
+            &Submenu::with_items(
+                app,
+                pkg_info.name.clone(),
+                true,
+                &[
+                    &PredefinedMenuItem::about(app, None, Some(about_metadata))?,
+                    &PredefinedMenuItem::separator(app)?,
+                    &PredefinedMenuItem::services(app, None)?,
+                    &PredefinedMenuItem::separator(app)?,
+                    &PredefinedMenuItem::hide(app, None)?,
+                    &PredefinedMenuItem::hide_others(app, None)?,
+                    &PredefinedMenuItem::separator(app)?,
+                    &PredefinedMenuItem::quit(app, None)?,
+                ],
+            )?,
+            &Submenu::with_items(
+                app,
+                "File",
+                true,
+                &[&PredefinedMenuItem::close_window(app, None)?],
+            )?,
+            &Submenu::with_items(
+                app,
+                "Edit",
+                true,
+                &[
+                    &PredefinedMenuItem::undo(app, None)?,
+                    &PredefinedMenuItem::redo(app, None)?,
+                    &PredefinedMenuItem::separator(app)?,
+                    &PredefinedMenuItem::cut(app, None)?,
+                    &PredefinedMenuItem::copy(app, None)?,
+                    &PredefinedMenuItem::paste(app, None)?,
+                    &PredefinedMenuItem::select_all(app, None)?,
+                ],
+            )?,
+            &Submenu::with_items(
+                app,
+                "View",
+                true,
+                &[&PredefinedMenuItem::fullscreen(app, None)?],
+            )?,
+            &Submenu::with_items(
+                app,
+                "Window",
+                true,
+                &[
+                    &PredefinedMenuItem::minimize(app, None)?,
+                    &PredefinedMenuItem::maximize(app, None)?,
+                    &PredefinedMenuItem::separator(app)?,
+                    &PredefinedMenuItem::close_window(app, None)?,
+                ],
+            )?,
+        ],
+    )?;
+
+    app.set_menu(menu)?;
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn load_about_icon() -> Option<tauri::image::Image<'static>> {
+    tauri::image::Image::from_bytes(include_bytes!("../icons/icon.png"))
+        .ok()
+        .map(|image| image.to_owned())
 }
 
 fn resource_rel_path() -> &'static str {
