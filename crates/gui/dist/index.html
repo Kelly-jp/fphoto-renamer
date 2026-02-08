@@ -35,11 +35,18 @@
 
       <section class="card">
         <h2>書式テンプレート</h2>
-        <input id="templateInput" type="text" value="{year}{month}{day}{hour}{minute}{second}_{camera_make}_{camera_model}_{lens_make}_{lens_model}_{film_sim}_{orig_name}" />
+        <div class="row inline template-row">
+          <input id="templateInput" type="text" value="{year}{month}{day}_{hour}{minute}{second}_{camera_make}_{camera_model}_{lens_make}_{lens_model}_{film_sim}_{orig_name}" />
+          <button id="resetTemplateBtn" type="button">デフォルトに戻す</button>
+        </div>
         <div id="tokenButtons" class="token-buttons"></div>
         <label class="inline-check">
           <input id="dedupeSameMake" type="checkbox" checked />
           カメラメーカー名とレンズメーカー名が同じ場合は1つだけ出力する
+        </label>
+        <label class="inline-check">
+          <input id="backupOriginals" type="checkbox" />
+          適用時に元ファイルを backup フォルダへバックアップする
         </label>
         <p id="templateError" class="error"></p>
         <p id="sample" class="sample">出力サンプル: サンプル対象がありません</p>

@@ -13,6 +13,9 @@ const TOKENS = [
   { token: "{orig_name}", label: "元ファイル名" },
 ];
 
+const DEFAULT_TEMPLATE =
+  "{year}{month}{day}_{hour}{minute}{second}_{camera_make}_{camera_model}_{lens_make}_{lens_model}_{film_sim}_{orig_name}";
+
 const state = {
   exclusions: [],
   plan: null,
@@ -37,7 +40,9 @@ const el = {
   jpgBrowseBtn: document.getElementById("jpgBrowseBtn"),
   rawBrowseBtn: document.getElementById("rawBrowseBtn"),
   templateInput: document.getElementById("templateInput"),
+  resetTemplateBtn: document.getElementById("resetTemplateBtn"),
   dedupeSameMake: document.getElementById("dedupeSameMake"),
+  backupOriginals: document.getElementById("backupOriginals"),
   tokenButtons: document.getElementById("tokenButtons"),
   templateError: document.getElementById("templateError"),
   sample: document.getElementById("sample"),
@@ -130,6 +135,14 @@ function insertTokenAtCursor(token) {
   input.setSelectionRange(cursor, cursor);
   input.focus();
   schedulePersistSettings();
+}
+
+async function resetTemplateToDefault() {
+  el.templateInput.value = DEFAULT_TEMPLATE;
+  schedulePersistSettings();
+  await refreshSampleRealtime();
+  await refreshPreviewOnTemplateChange();
+  el.templateInput.focus();
 }
 
 function renderTokenButtons() {
@@ -287,7 +300,8 @@ function updateApplyButton() {
   el.applyBtn.disabled = !(state.templateValid && state.plan);
 }
 
-async function updatePlan(reason = "preview") {
+async function updatePlan(reason = "preview", options = {}) {
+  const skipSampleRefresh = Boolean(options.skipSampleRefresh);
   const request = toPlanRequest();
   if (!request.jpgInput) {
     throw new Error("JPGフォルダを入力してください");
@@ -301,7 +315,9 @@ async function updatePlan(reason = "preview") {
   state.plan = plan;
   renderPlan(plan);
   updateApplyButton();
-  await refreshSampleRealtime();
+  if (!skipSampleRefresh) {
+    await refreshSampleRealtime();
+  }
 }
 
 async function onPreview() {
@@ -328,7 +344,12 @@ async function onApply() {
       .map((row) => basename(row.target_path));
     state.recentlyAppliedNames = new Set(appliedNames);
 
-    const result = await invokeCommand("apply_plan_cmd", { plan: state.plan });
+    const result = await invokeCommand("apply_plan_cmd", {
+      request: {
+        plan: state.plan,
+        backupOriginals: el.backupOriginals.checked,
+      },
+    });
     setMessage(`適用完了: ${result.applied}件`, false);
     await updatePlan("after_apply");
   } catch (error) {
@@ -359,6 +380,21 @@ async function refreshPreviewIfJpgSelected(field) {
   try {
     await updatePlan("preview");
     setMessage("JPGフォルダを設定しプレビューを更新しました", false);
+  } catch (error) {
+    setMessage(`プレビュー生成失敗: ${toErrorMessage(error)}`, true);
+  }
+}
+
+async function refreshPreviewOnTemplateChange() {
+  if (!el.jpgInput.value.trim()) {
+    return;
+  }
+  if (!state.templateValid) {
+    return;
+  }
+  try {
+    await updatePlan("preview", { skipSampleRefresh: true });
+    setMessage("テンプレート変更を反映してプレビューを更新しました", false);
   } catch (error) {
     setMessage(`プレビュー生成失敗: ${toErrorMessage(error)}`, true);
   }
@@ -830,9 +866,11 @@ function bindEvents() {
   bindDropTarget(el.rawInput, "raw");
   bindWindowDomDropEvents();
 
-  el.templateInput.addEventListener("input", () => {
+  el.resetTemplateBtn.addEventListener("click", resetTemplateToDefault);
+  el.templateInput.addEventListener("input", async () => {
     schedulePersistSettings();
-    refreshSampleRealtime();
+    await refreshSampleRealtime();
+    await refreshPreviewOnTemplateChange();
   });
   el.dedupeSameMake.addEventListener("change", refreshSampleRealtime);
   el.previewBtn.addEventListener("click", onPreview);

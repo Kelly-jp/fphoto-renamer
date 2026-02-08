@@ -63,6 +63,14 @@ body {
   grid-template-columns: 1fr auto;
 }
 
+.template-row {
+  margin-bottom: 0;
+}
+
+.template-row button {
+  white-space: nowrap;
+}
+
 .drop-help {
   margin: 0 0 10px 170px;
   font-size: 12px;

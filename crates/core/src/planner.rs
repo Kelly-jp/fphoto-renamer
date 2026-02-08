@@ -6,6 +6,7 @@ use crate::sanitize::{
 };
 use crate::template::{parse_template, render_template_with_options};
 use crate::xmp_reader::read_xmp_metadata;
+use crate::DEFAULT_TEMPLATE;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
@@ -33,7 +34,7 @@ impl Default for PlanOptions {
             raw_input: None,
             recursive: false,
             include_hidden: false,
-            template: "{year}{month}{day}{hour}{minute}{second}_{camera_make}_{camera_model}_{lens_make}_{lens_model}_{film_sim}_{orig_name}".to_string(),
+            template: DEFAULT_TEMPLATE.to_string(),
             dedupe_same_maker: true,
             exclusions: Vec::new(),
             max_filename_len: 240,
@@ -63,6 +64,7 @@ pub struct RenameStats {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RenamePlan {
+    pub jpg_root: PathBuf,
     pub template: String,
     pub exclusions: Vec<String>,
     pub candidates: Vec<RenameCandidate>,
@@ -131,6 +133,7 @@ pub fn generate_plan(options: &PlanOptions) -> Result<RenamePlan> {
     }
 
     Ok(RenamePlan {
+        jpg_root: options.jpg_input.clone(),
         template: options.template.clone(),
         exclusions: options.exclusions.clone(),
         candidates,

@@ -3,6 +3,7 @@ use crate::planner::{RenameCandidate, RenamePlan};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -24,18 +25,31 @@ pub struct ApplyResult {
     pub unchanged: usize,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
+pub struct ApplyOptions {
+    pub backup_originals: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UndoResult {
     pub restored: usize,
 }
 
 pub fn apply_plan(plan: &RenamePlan) -> Result<ApplyResult> {
+    apply_plan_with_options(plan, &ApplyOptions::default())
+}
+
+pub fn apply_plan_with_options(plan: &RenamePlan, options: &ApplyOptions) -> Result<ApplyResult> {
     let candidates: Vec<&RenameCandidate> = plan.candidates.iter().filter(|c| c.changed).collect();
     if candidates.is_empty() {
         return Ok(ApplyResult {
             applied: 0,
             unchanged: plan.candidates.len(),
         });
+    }
+
+    if options.backup_originals {
+        backup_original_files(plan, &candidates)?;
     }
 
     let mut first_phase = HashMap::<PathBuf, PathBuf>::new();
@@ -78,6 +92,83 @@ pub fn apply_plan(plan: &RenamePlan) -> Result<ApplyResult> {
         applied: operations.len(),
         unchanged: plan.candidates.len().saturating_sub(operations.len()),
     })
+}
+
+fn backup_original_files(plan: &RenamePlan, candidates: &[&RenameCandidate]) -> Result<()> {
+    let backup_root = plan.jpg_root.join("backup");
+    fs::create_dir_all(&backup_root).with_context(|| {
+        format!(
+            "バックアップフォルダを作成できませんでした: {}",
+            backup_root.display()
+        )
+    })?;
+
+    for candidate in candidates {
+        let backup_path =
+            resolve_backup_path(&backup_root, &plan.jpg_root, &candidate.original_path);
+        if let Some(parent) = backup_path.parent() {
+            fs::create_dir_all(parent).with_context(|| {
+                format!(
+                    "バックアップ用フォルダを作成できませんでした: {}",
+                    parent.display()
+                )
+            })?;
+        }
+        fs::copy(&candidate.original_path, &backup_path).with_context(|| {
+            format!(
+                "バックアップに失敗しました: {} -> {}",
+                candidate.original_path.display(),
+                backup_path.display()
+            )
+        })?;
+    }
+
+    Ok(())
+}
+
+fn resolve_backup_path(backup_root: &Path, jpg_root: &Path, original_path: &Path) -> PathBuf {
+    if let Ok(relative) = original_path.strip_prefix(jpg_root) {
+        if !relative.as_os_str().is_empty() {
+            let candidate = backup_root.join(relative);
+            return unique_backup_path(candidate);
+        }
+    }
+
+    let file_name = original_path
+        .file_name()
+        .map(|v| v.to_os_string())
+        .unwrap_or_else(|| OsString::from("file"));
+    unique_backup_path(backup_root.join(file_name))
+}
+
+fn unique_backup_path(candidate: PathBuf) -> PathBuf {
+    if !candidate.exists() {
+        return candidate;
+    }
+
+    let parent = candidate.parent().unwrap_or_else(|| Path::new("."));
+    let stem = candidate
+        .file_stem()
+        .map(|v| v.to_string_lossy().to_string())
+        .unwrap_or_else(|| "file".to_string());
+    let ext = candidate
+        .extension()
+        .map(|v| v.to_string_lossy().to_string())
+        .unwrap_or_default();
+
+    let mut n = 1usize;
+    loop {
+        let mut name = format!("{}_{:03}", stem, n);
+        if !ext.is_empty() {
+            name.push('.');
+            name.push_str(&ext);
+        }
+        let next = parent.join(name);
+        if !next.exists() {
+            return next;
+        }
+        n += 1;
+    }
 }
 
 pub fn undo_last() -> Result<UndoResult> {

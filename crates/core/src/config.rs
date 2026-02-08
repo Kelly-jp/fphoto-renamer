@@ -1,3 +1,4 @@
+use crate::DEFAULT_TEMPLATE;
 use anyhow::{Context, Result};
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
@@ -21,7 +22,7 @@ impl Default for AppConfig {
             recursive_default: false,
             include_hidden_default: false,
             language: "ja".to_string(),
-            template: "{year}{month}{day}{hour}{minute}{second}_{camera_make}_{camera_model}_{lens_make}_{lens_model}_{film_sim}_{orig_name}".to_string(),
+            template: DEFAULT_TEMPLATE.to_string(),
             exclude_strings: Vec::new(),
         }
     }

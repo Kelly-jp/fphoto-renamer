@@ -2,8 +2,9 @@
 
 use chrono::{DateTime, Local, Utc};
 use fphoto_renamer_core::{
-    apply_plan, generate_plan, load_config, render_preview_sample, save_config, undo_last,
-    validate_template, AppConfig, MetadataSource, PhotoMetadata, PlanOptions, RenamePlan,
+    apply_plan_with_options, generate_plan, load_config, render_preview_sample, save_config,
+    undo_last, validate_template, AppConfig, ApplyOptions, MetadataSource, PhotoMetadata,
+    PlanOptions, RenamePlan,
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -58,6 +59,14 @@ struct SaveGuiSettingsRequest {
     exclusions: Vec<String>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ApplyRequest {
+    plan: RenamePlan,
+    #[serde(default)]
+    backup_originals: bool,
+}
+
 struct AppState {
     launched_at_utc: DateTime<Utc>,
 }
@@ -79,8 +88,11 @@ fn generate_plan_cmd(request: PlanRequest) -> Result<RenamePlan, String> {
 }
 
 #[tauri::command]
-fn apply_plan_cmd(plan: RenamePlan) -> Result<fphoto_renamer_core::ApplyResult, String> {
-    apply_plan(&plan).map_err(|err| err.to_string())
+fn apply_plan_cmd(request: ApplyRequest) -> Result<fphoto_renamer_core::ApplyResult, String> {
+    let options = ApplyOptions {
+        backup_originals: request.backup_originals,
+    };
+    apply_plan_with_options(&request.plan, &options).map_err(|err| err.to_string())
 }
 
 #[tauri::command]

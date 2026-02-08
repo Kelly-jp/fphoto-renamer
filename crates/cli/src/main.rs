@@ -2,6 +2,7 @@ use anyhow::Result;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use fphoto_renamer_core::{
     app_paths, apply_plan, generate_plan, load_config, parse_template, undo_last, PlanOptions,
+    DEFAULT_TEMPLATE,
 };
 
 #[derive(Debug, Parser)]
@@ -44,7 +45,7 @@ struct RenameArgs {
     apply: bool,
     #[arg(
         long,
-        default_value = "{year}{month}{day}{hour}{minute}{second}_{camera_make}_{camera_model}_{lens_make}_{lens_model}_{film_sim}_{orig_name}"
+        default_value = DEFAULT_TEMPLATE
     )]
     template: String,
     #[arg(long)]
