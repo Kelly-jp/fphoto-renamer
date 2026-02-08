@@ -38,7 +38,9 @@ const el = {
   jpgDropZone: document.getElementById("jpgDropZone"),
   rawDropZone: document.getElementById("rawDropZone"),
   jpgBrowseBtn: document.getElementById("jpgBrowseBtn"),
+  jpgClearBtn: document.getElementById("jpgClearBtn"),
   rawBrowseBtn: document.getElementById("rawBrowseBtn"),
+  rawClearBtn: document.getElementById("rawClearBtn"),
   templateInput: document.getElementById("templateInput"),
   resetTemplateBtn: document.getElementById("resetTemplateBtn"),
   dedupeSameMake: document.getElementById("dedupeSameMake"),
@@ -316,6 +318,14 @@ async function refreshSampleRealtime() {
 
 function updateApplyButton() {
   el.applyBtn.disabled = !(state.templateValid && state.plan);
+}
+
+function clearPlanState() {
+  state.plan = null;
+  state.recentlyAppliedNames.clear();
+  el.planRows.innerHTML = "";
+  el.stats.textContent = "件数: -";
+  updateApplyButton();
 }
 
 async function updatePlan(reason = "preview", options = {}) {
@@ -670,6 +680,35 @@ async function onBrowse(field) {
   }
 }
 
+async function clearFolder(field) {
+  const input = targetInputByField(field);
+  if (!input.value.trim()) {
+    setMessage(`${field === "jpg" ? "JPG" : "RAW"}フォルダは未設定です`, false);
+    return;
+  }
+
+  input.value = "";
+  state.activeDropField = field;
+
+  if (field === "jpg") {
+    clearPlanState();
+    setMessage("JPGフォルダをクリアしました", false);
+    return;
+  }
+
+  if (!el.jpgInput.value.trim()) {
+    setMessage("RAWフォルダをクリアしました", false);
+    return;
+  }
+
+  try {
+    await updatePlan("preview");
+    setMessage("RAWフォルダをクリアしプレビューを更新しました", false);
+  } catch (error) {
+    setMessage(`プレビュー生成失敗: ${toErrorMessage(error)}`, true);
+  }
+}
+
 function resolveDropField(options = {}) {
   const { clientX, clientY, payload } = options;
   if (Number.isFinite(clientX) && Number.isFinite(clientY)) {
@@ -893,7 +932,9 @@ function bindEvents() {
   });
 
   el.jpgBrowseBtn.addEventListener("click", () => onBrowse("jpg"));
+  el.jpgClearBtn.addEventListener("click", () => clearFolder("jpg"));
   el.rawBrowseBtn.addEventListener("click", () => onBrowse("raw"));
+  el.rawClearBtn.addEventListener("click", () => clearFolder("raw"));
 
   bindDropTarget(el.jpgInput, "jpg");
   bindDropTarget(el.rawInput, "raw");

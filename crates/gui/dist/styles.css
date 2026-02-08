@@ -81,6 +81,11 @@ body {
   position: relative;
 }
 
+.folder-actions {
+  display: flex;
+  gap: 6px;
+}
+
 input[type="text"] {
   width: 100%;
   padding: 8px 10px;

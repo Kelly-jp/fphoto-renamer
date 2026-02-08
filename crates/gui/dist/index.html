@@ -20,7 +20,10 @@
             <input id="jpgInput" class="drop-target" type="text" placeholder="/path/to/jpg" />
             <div class="drop-overlay">ここにドロップすると JPG フォルダに設定されます</div>
           </div>
-          <button id="jpgBrowseBtn" type="button">選択</button>
+          <div class="folder-actions">
+            <button id="jpgBrowseBtn" type="button">選択</button>
+            <button id="jpgClearBtn" type="button">クリア</button>
+          </div>
         </div>
         <div id="rawRow" class="row">
           <label for="rawInput">RAWフォルダ (任意)</label>
@@ -28,7 +31,10 @@
             <input id="rawInput" class="drop-target" type="text" placeholder="/path/to/raw" />
             <div class="drop-overlay">ここにドロップすると RAW フォルダに設定されます</div>
           </div>
-          <button id="rawBrowseBtn" type="button">選択</button>
+          <div class="folder-actions">
+            <button id="rawBrowseBtn" type="button">選択</button>
+            <button id="rawClearBtn" type="button">クリア</button>
+          </div>
         </div>
         <p class="drop-help">フォルダを入力欄へドラッグ＆ドロップして設定できます。</p>
       </section>
