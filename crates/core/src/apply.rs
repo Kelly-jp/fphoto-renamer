@@ -11,6 +11,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct UndoLog {
     operations: Vec<RenameOperation>,
+    #[serde(default)]
+    backup_originals: bool,
+    #[serde(default)]
+    jpg_root: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -86,7 +90,7 @@ pub fn apply_plan_with_options(plan: &RenamePlan, options: &ApplyOptions) -> Res
         });
     }
 
-    persist_undo(&operations)?;
+    persist_undo(&operations, plan, options)?;
 
     Ok(ApplyResult {
         applied: operations.len(),
@@ -198,6 +202,8 @@ pub fn undo_last() -> Result<UndoResult> {
         })?;
     }
 
+    cleanup_backup_if_needed(&log)?;
+
     fs::remove_file(&paths.undo_path).with_context(|| {
         format!(
             "取り消しログ削除に失敗しました: {}",
@@ -210,7 +216,11 @@ pub fn undo_last() -> Result<UndoResult> {
     })
 }
 
-fn persist_undo(operations: &[RenameOperation]) -> Result<()> {
+fn persist_undo(
+    operations: &[RenameOperation],
+    plan: &RenamePlan,
+    options: &ApplyOptions,
+) -> Result<()> {
     let paths = app_paths()?;
     fs::create_dir_all(&paths.config_dir).with_context(|| {
         format!(
@@ -221,6 +231,8 @@ fn persist_undo(operations: &[RenameOperation]) -> Result<()> {
 
     let log = UndoLog {
         operations: operations.to_vec(),
+        backup_originals: options.backup_originals,
+        jpg_root: Some(plan.jpg_root.clone()),
     };
     let body =
         serde_json::to_string_pretty(&log).context("取り消しログのシリアライズに失敗しました")?;
@@ -230,6 +242,39 @@ fn persist_undo(operations: &[RenameOperation]) -> Result<()> {
             paths.undo_path.display()
         )
     })?;
+    Ok(())
+}
+
+fn cleanup_backup_if_needed(log: &UndoLog) -> Result<()> {
+    if !log.backup_originals {
+        return Ok(());
+    }
+
+    let Some(jpg_root) = log.jpg_root.as_ref() else {
+        return Ok(());
+    };
+
+    let backup_root = jpg_root.join("backup");
+    if !backup_root.exists() {
+        return Ok(());
+    }
+
+    if backup_root.is_dir() {
+        fs::remove_dir_all(&backup_root).with_context(|| {
+            format!(
+                "バックアップフォルダ削除に失敗しました: {}",
+                backup_root.display()
+            )
+        })?;
+    } else {
+        fs::remove_file(&backup_root).with_context(|| {
+            format!(
+                "バックアップファイル削除に失敗しました: {}",
+                backup_root.display()
+            )
+        })?;
+    }
+
     Ok(())
 }
 

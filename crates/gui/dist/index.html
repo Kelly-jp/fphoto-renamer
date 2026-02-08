@@ -10,7 +10,6 @@
     <main class="container">
       <header class="header">
         <h1>fphoto-renamer</h1>
-        <p id="message" class="message"></p>
       </header>
 
       <section class="card">
@@ -72,26 +71,17 @@
 
       <section class="card">
         <div class="actions">
-          <button id="previewBtn" type="button">プレビュー更新</button>
           <button id="applyBtn" type="button" disabled>変換</button>
           <button id="undoBtn" type="button" disabled>元に戻す</button>
         </div>
+        <p id="actionMessage" class="action-message"></p>
       </section>
 
       <section class="card">
-        <p id="stats">件数: -</p>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>元ファイル</th>
-                <th>新ファイル</th>
-                <th>ステータス</th>
-              </tr>
-            </thead>
-            <tbody id="planRows"></tbody>
-          </table>
-        </div>
+        <h2>変換ログ</h2>
+        <ul id="convertLog" class="convert-log">
+          <li class="empty">まだ変換ログはありません</li>
+        </ul>
       </section>
     </main>
 

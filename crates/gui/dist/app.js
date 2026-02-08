@@ -23,19 +23,18 @@ const state = {
   plan: null,
   templateValid: false,
   templateValidationMessage: "",
-  activeDropField: "jpg",
   hoverField: null,
-  lastDropPath: null,
-  lastDropAt: 0,
-  recentlyAppliedNames: new Set(),
+  hoverFieldAt: 0,
+  dragDepth: { jpg: 0, raw: 0 },
+  pendingZoneDropField: null,
+  pendingTauriPath: null,
+  lastHandledDrop: null,
   saveTimer: null,
   unlistenFns: [],
 };
 
 const el = {
-  message: document.getElementById("message"),
-  jpgRow: document.getElementById("jpgRow"),
-  rawRow: document.getElementById("rawRow"),
+  message: document.getElementById("actionMessage"),
   jpgInput: document.getElementById("jpgInput"),
   rawInput: document.getElementById("rawInput"),
   jpgDropZone: document.getElementById("jpgDropZone"),
@@ -55,11 +54,9 @@ const el = {
   excludeInput: document.getElementById("excludeInput"),
   addExcludeBtn: document.getElementById("addExcludeBtn"),
   excludeList: document.getElementById("excludeList"),
-  previewBtn: document.getElementById("previewBtn"),
   applyBtn: document.getElementById("applyBtn"),
   undoBtn: document.getElementById("undoBtn"),
-  stats: document.getElementById("stats"),
-  planRows: document.getElementById("planRows"),
+  convertLog: document.getElementById("convertLog"),
 };
 
 function getInvoke() {
@@ -187,7 +184,6 @@ function insertTextAtSelection(input, text) {
 async function onTemplateInputChanged() {
   schedulePersistSettings();
   await refreshSampleRealtime();
-  await refreshPreviewOnTemplateChange();
 }
 
 function insertTokenAtCursor(token) {
@@ -207,7 +203,6 @@ async function resetTemplateToDefault() {
   el.templateInput.value = DEFAULT_TEMPLATE;
   schedulePersistSettings();
   await refreshSampleRealtime();
-  await refreshPreviewOnTemplateChange();
   el.templateInput.focus();
 }
 
@@ -241,7 +236,6 @@ function renderExclusions() {
       renderExclusions();
       schedulePersistSettings();
       await refreshSampleRealtime();
-      await refreshPreviewOnTemplateChange("削除文字列変更を反映してプレビューを更新しました");
     });
     li.appendChild(text);
     li.appendChild(removeBtn);
@@ -276,44 +270,6 @@ function toPlanRequest() {
   };
 }
 
-function renderPlan(plan) {
-  el.planRows.innerHTML = "";
-  let updatedCount = 0;
-  let skippedCount = 0;
-  let errorCount = 0;
-
-  for (const row of plan.candidates) {
-    const originalName = basename(row.original_path);
-    const targetName = basename(row.target_path);
-    const status = rowStatus(row, originalName);
-    if (status === "変換済み") {
-      updatedCount += 1;
-    } else if (status.startsWith("スキップ")) {
-      skippedCount += 1;
-    } else if (status.startsWith("エラー")) {
-      errorCount += 1;
-    }
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td>${escapeHtml(originalName)}</td>
-      <td>${escapeHtml(targetName)}</td>
-      <td>${escapeHtml(status)}</td>
-    `;
-    el.planRows.appendChild(tr);
-  }
-
-  el.stats.textContent = `件数: 全件数=${plan.candidates.length} 変換済み=${updatedCount} スキップ=${skippedCount} エラー=${errorCount}`;
-}
-
-function escapeHtml(value) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
-
 function basename(path) {
   if (typeof path !== "string") {
     return "";
@@ -323,23 +279,60 @@ function basename(path) {
   return index >= 0 ? normalized.slice(index + 1) : normalized;
 }
 
-function rowStatus(row, originalName) {
-  const errorMessage =
-    typeof row.error_message === "string"
-      ? row.error_message
-      : typeof row.error === "string"
-        ? row.error
-        : "";
-  if (errorMessage) {
-    return `エラー: ${errorMessage}`;
+function renderConvertLogEntries(entries) {
+  el.convertLog.innerHTML = "";
+  if (!entries.length) {
+    renderEmptyConvertLog();
+    return;
   }
-  if (state.recentlyAppliedNames.has(originalName)) {
-    return "変換済み";
+
+  for (const entry of entries) {
+    appendSingleConvertLogEntry(entry);
   }
-  if (row.changed) {
-    return "未変換";
+}
+
+function buildLogEntriesFromPlan(plan, changedEmoji) {
+  return plan.candidates.map((row) => ({
+    emoji: row.changed ? changedEmoji : "⏭️",
+    original: basename(row.original_path),
+    target: basename(row.target_path),
+  }));
+}
+
+function buildUndoLogEntriesFromPlan(plan) {
+  return plan.candidates
+    .filter((row) => row.changed)
+    .map((row) => ({
+      emoji: "↩️",
+      original: basename(row.target_path),
+      target: basename(row.original_path),
+    }));
+}
+
+function renderEmptyConvertLog() {
+  const empty = document.createElement("li");
+  empty.className = "empty";
+  empty.textContent = "まだ変換ログはありません";
+  el.convertLog.appendChild(empty);
+}
+
+function appendSingleConvertLogEntry(entry) {
+  const li = document.createElement("li");
+  li.textContent = `${entry.emoji} ${entry.original} → ${entry.target}`;
+  el.convertLog.appendChild(li);
+}
+
+function appendConvertLogEntries(entries) {
+  if (!entries.length) {
+    return;
   }
-  return "スキップ(同名)";
+  const onlyChild = el.convertLog.firstElementChild;
+  if (onlyChild && onlyChild.classList.contains("empty")) {
+    el.convertLog.innerHTML = "";
+  }
+  for (const entry of entries) {
+    appendSingleConvertLogEntry(entry);
+  }
 }
 
 async function validateTemplate() {
@@ -387,7 +380,7 @@ async function refreshSampleRealtime() {
 }
 
 function updateApplyButton() {
-  el.applyBtn.disabled = !(state.templateValid && state.plan);
+  el.applyBtn.disabled = !(state.templateValid && el.jpgInput.value.trim().length > 0);
 }
 
 function setUndoButtonEnabled(enabled) {
@@ -396,114 +389,68 @@ function setUndoButtonEnabled(enabled) {
 
 function clearPlanState() {
   state.plan = null;
-  state.recentlyAppliedNames.clear();
-  el.planRows.innerHTML = "";
-  el.stats.textContent = "件数: -";
   updateApplyButton();
   setUndoButtonEnabled(false);
 }
 
-async function updatePlan(reason = "preview", options = {}) {
-  const skipSampleRefresh = Boolean(options.skipSampleRefresh);
+async function generatePlanForApply() {
   const request = toPlanRequest();
   if (!request.jpgInput) {
     throw new Error("JPGフォルダを入力してください");
   }
-
-  if (reason !== "after_apply") {
-    state.recentlyAppliedNames.clear();
-  }
-
-  const plan = await invokeCommand("generate_plan_cmd", { request });
-  state.plan = plan;
-  renderPlan(plan);
-  updateApplyButton();
-  if (!skipSampleRefresh) {
-    await refreshSampleRealtime();
-  }
-}
-
-async function onPreview() {
-  try {
-    await updatePlan("preview");
-    setMessage("プレビューを更新しました", false);
-  } catch (error) {
-    setMessage(`プレビュー生成失敗: ${toErrorMessage(error)}`, true);
-  }
+  return invokeCommand("generate_plan_cmd", { request });
 }
 
 async function onApply() {
+  let plan = null;
   try {
     const valid = await validateTemplate();
     if (!valid) {
       return;
     }
 
-    await updatePlan("apply", { skipSampleRefresh: true });
-    if (!state.plan) {
-      throw new Error("プレビューを生成できませんでした");
-    }
-
-    const appliedNames = state.plan.candidates
-      .filter((row) => row.changed)
-      .map((row) => basename(row.target_path));
-    state.recentlyAppliedNames = new Set(appliedNames);
+    plan = await generatePlanForApply();
+    state.plan = plan;
 
     const result = await invokeCommand("apply_plan_cmd", {
       request: {
-        plan: state.plan,
+        plan,
         backupOriginals: el.backupOriginals.checked,
       },
     });
-    setMessage(`適用完了: ${result.applied}件`, false);
+    renderConvertLogEntries(buildLogEntriesFromPlan(plan, "✅"));
+    setMessage(`変換完了: ${result.applied}件`, false);
     setUndoButtonEnabled(result.applied > 0);
-    await updatePlan("after_apply");
   } catch (error) {
-    state.recentlyAppliedNames.clear();
-    setMessage(`適用失敗: ${toErrorMessage(error)}`, true);
+    if (plan) {
+      renderConvertLogEntries(buildLogEntriesFromPlan(plan, "❌"));
+    }
+    setMessage(`変換失敗: ${toErrorMessage(error)}`, true);
   }
 }
 
 async function onUndo() {
   try {
     const result = await invokeCommand("undo_last_cmd");
+    const undoEntries = state.plan
+      ? buildUndoLogEntriesFromPlan(state.plan)
+      : [];
+    const nextLogEntries =
+      undoEntries.length > 0
+        ? undoEntries
+        : [
+            {
+              emoji: "↩️",
+              original: "元に戻し実行",
+              target: `${result.restored}件`,
+            },
+          ];
+    renderConvertLogEntries(nextLogEntries);
     setMessage(`元に戻し完了: ${result.restored}件`, false);
+    state.plan = null;
     setUndoButtonEnabled(false);
-    if (el.jpgInput.value.trim()) {
-      await updatePlan("preview");
-    }
   } catch (error) {
     setMessage(`元に戻し失敗: ${toErrorMessage(error)}`, true);
-  }
-}
-
-async function refreshPreviewIfJpgSelected(field) {
-  if (field !== "jpg") {
-    return;
-  }
-  if (!el.jpgInput.value.trim()) {
-    return;
-  }
-  try {
-    await updatePlan("preview");
-    setMessage("JPGフォルダを設定しプレビューを更新しました", false);
-  } catch (error) {
-    setMessage(`プレビュー生成失敗: ${toErrorMessage(error)}`, true);
-  }
-}
-
-async function refreshPreviewOnTemplateChange(successMessage = "テンプレート変更を反映してプレビューを更新しました") {
-  if (!el.jpgInput.value.trim()) {
-    return;
-  }
-  if (!state.templateValid) {
-    return;
-  }
-  try {
-    await updatePlan("preview", { skipSampleRefresh: true });
-    setMessage(successMessage, false);
-  } catch (error) {
-    setMessage(`プレビュー生成失敗: ${toErrorMessage(error)}`, true);
   }
 }
 
@@ -618,65 +565,57 @@ function targetInputByField(field) {
   return field === "raw" ? el.rawInput : el.jpgInput;
 }
 
-function targetRowByField(field) {
-  return field === "raw" ? el.rawRow : el.jpgRow;
-}
-
 function targetDropZoneByField(field) {
   return field === "raw" ? el.rawDropZone : el.jpgDropZone;
 }
 
-function clearDropOverlay() {
-  el.jpgDropZone.classList.remove("drag-over");
-  el.rawDropZone.classList.remove("drag-over");
-}
-
-function setDropOverlay(field, visible) {
-  clearDropOverlay();
-  if (!visible) {
-    return;
+function fieldFromEventTarget(target) {
+  if (!(target instanceof Node)) {
+    return null;
   }
-  targetDropZoneByField(field).classList.add("drag-over");
-}
-
-function setHoverField(field) {
-  state.hoverField = field;
-  if (field) {
-    setDropOverlay(field, true);
-  } else {
-    clearDropOverlay();
-  }
-}
-
-function activeFieldName() {
-  const focused = document.activeElement;
-  if (focused === el.rawInput) {
-    return "raw";
-  }
-  if (focused === el.jpgInput) {
+  if (el.jpgDropZone.contains(target)) {
     return "jpg";
   }
-  return state.activeDropField;
+  if (el.rawDropZone.contains(target)) {
+    return "raw";
+  }
+  return null;
 }
 
-function fieldFromClientPosition(x, y) {
-  const candidates = [
-    { field: "jpg", rect: el.jpgRow.getBoundingClientRect() },
-    { field: "raw", rect: el.rawRow.getBoundingClientRect() },
-  ];
+function pointInsideRect(x, y, rect, margin = 0) {
+  return (
+    x >= rect.left - margin &&
+    x <= rect.right + margin &&
+    y >= rect.top - margin &&
+    y <= rect.bottom + margin
+  );
+}
 
-  for (const item of candidates) {
-    if (
-      x >= item.rect.left &&
-      x <= item.rect.right &&
-      y >= item.rect.top &&
-      y <= item.rect.bottom
-    ) {
-      return item.field;
+function distancePointToRect(x, y, rect) {
+  const dx =
+    x < rect.left ? rect.left - x : x > rect.right ? x - rect.right : 0;
+  const dy =
+    y < rect.top ? rect.top - y : y > rect.bottom ? y - rect.bottom : 0;
+  return Math.hypot(dx, dy);
+}
+
+function scoreFieldFromPoints(points, field) {
+  const rect = targetDropZoneByField(field).getBoundingClientRect();
+  let score = 0;
+  for (const point of points) {
+    if (pointInsideRect(point.x, point.y, rect, 0)) {
+      score += 4;
+      continue;
+    }
+    if (pointInsideRect(point.x, point.y, rect, 18)) {
+      score += 2;
+      continue;
+    }
+    if (distancePointToRect(point.x, point.y, rect) <= 24) {
+      score += 1;
     }
   }
-
-  return null;
+  return score;
 }
 
 function fieldFromPayloadPosition(payload) {
@@ -698,26 +637,131 @@ function fieldFromPayloadPosition(payload) {
       : typeof window.screenTop === "number"
         ? window.screenTop
         : 0;
-  const points = [
+
+  const originCandidates = [
     { x: pos.x, y: pos.y },
     { x: pos.x / dpr, y: pos.y / dpr },
     { x: pos.x - screenX, y: pos.y - screenY },
     { x: (pos.x - screenX) / dpr, y: (pos.y - screenY) / dpr },
   ];
+  const hotspotOffsets = [
+    { x: 0, y: 0 },
+    { x: 0, y: 26 },
+    { x: 0, y: 40 },
+    { x: -10, y: 34 },
+    { x: 10, y: 34 },
+  ];
 
-  const matched = new Set();
-  for (const point of points) {
-    const field = fieldFromClientPosition(point.x, point.y);
-    if (field) {
-      matched.add(field);
+  const points = [];
+  for (const origin of originCandidates) {
+    for (const offset of hotspotOffsets) {
+      points.push({ x: origin.x + offset.x, y: origin.y + offset.y });
     }
   }
 
-  if (matched.size === 1) {
-    return [...matched][0];
+  const jpgScore = scoreFieldFromPoints(points, "jpg");
+  const rawScore = scoreFieldFromPoints(points, "raw");
+  if (jpgScore <= 0 && rawScore <= 0) {
+    return null;
   }
+  if (jpgScore === rawScore) {
+    return null;
+  }
+  return jpgScore > rawScore ? "jpg" : "raw";
+}
 
-  return null;
+function clearDropOverlay() {
+  el.jpgDropZone.classList.remove("drag-over");
+  el.rawDropZone.classList.remove("drag-over");
+}
+
+function setDropOverlay(field, visible) {
+  clearDropOverlay();
+  if (!visible) {
+    return;
+  }
+  targetDropZoneByField(field).classList.add("drag-over");
+}
+
+function setHoverField(field) {
+  if (state.hoverField === field) {
+    if (field) {
+      state.hoverFieldAt = Date.now();
+    }
+    return;
+  }
+  state.hoverField = field;
+  state.hoverFieldAt = field ? Date.now() : 0;
+  if (field) {
+    setDropOverlay(field, true);
+  } else {
+    clearDropOverlay();
+  }
+}
+
+function resetDragDepth() {
+  state.dragDepth.jpg = 0;
+  state.dragDepth.raw = 0;
+}
+
+function clearDragHoverState() {
+  resetDragDepth();
+  setHoverField(null);
+}
+
+function markZoneDragEnter(field) {
+  state.dragDepth[field] += 1;
+  setHoverField(field);
+}
+
+function markZoneDragLeave(field) {
+  if (state.dragDepth[field] > 0) {
+    state.dragDepth[field] -= 1;
+  }
+  if (state.hoverField === field && state.dragDepth[field] === 0) {
+    setHoverField(null);
+  }
+}
+
+function rememberPendingZoneDropField(field) {
+  state.pendingZoneDropField = {
+    field,
+    at: Date.now(),
+  };
+}
+
+function consumePendingZoneDropField(maxAgeMs = 1200) {
+  const pending = state.pendingZoneDropField;
+  state.pendingZoneDropField = null;
+  if (!pending) {
+    return null;
+  }
+  if (Date.now() - pending.at > maxAgeMs) {
+    return null;
+  }
+  return pending.field;
+}
+
+function consumePendingTauriPath(maxAgeMs = 1200) {
+  const pending = state.pendingTauriPath;
+  state.pendingTauriPath = null;
+  if (!pending) {
+    return null;
+  }
+  if (Date.now() - pending.at > maxAgeMs) {
+    return null;
+  }
+  return pending.path;
+}
+
+function recentHoverField(maxAgeMs = 1200) {
+  if (!state.hoverField) {
+    return null;
+  }
+  if (Date.now() - state.hoverFieldAt > maxAgeMs) {
+    return null;
+  }
+  return state.hoverField;
 }
 
 async function setFolderPathToField(rawPath, field) {
@@ -731,9 +775,7 @@ async function setFolderPathToField(rawPath, field) {
       path: rawPath,
     });
     input.value = folderPath;
-    state.activeDropField = field;
-    setMessage(`${field === "jpg" ? "JPG" : "RAW"}フォルダを設定しました`, false);
-    await refreshPreviewIfJpgSelected(field);
+    updateApplyButton();
   } catch (error) {
     setMessage(`フォルダ設定失敗: ${toErrorMessage(error)}`, true);
   }
@@ -749,9 +791,7 @@ async function onBrowse(field) {
       return;
     }
     input.value = selected;
-    state.activeDropField = field;
-    setMessage(`${field === "jpg" ? "JPG" : "RAW"}フォルダを設定しました`, false);
-    await refreshPreviewIfJpgSelected(field);
+    updateApplyButton();
   } catch (error) {
     setMessage(`フォルダ選択失敗: ${toErrorMessage(error)}`, true);
   }
@@ -760,130 +800,123 @@ async function onBrowse(field) {
 async function clearFolder(field) {
   const input = targetInputByField(field);
   if (!input.value.trim()) {
-    setMessage(`${field === "jpg" ? "JPG" : "RAW"}フォルダは未設定です`, false);
     return;
   }
 
   input.value = "";
-  state.activeDropField = field;
+  updateApplyButton();
 
   if (field === "jpg") {
     clearPlanState();
-    setMessage("JPGフォルダをクリアしました", false);
+    return;
+  }
+}
+
+function dropSourcePriority(source) {
+  switch (source) {
+    case "zone":
+      return 3;
+    case "window":
+      return 2;
+    case "tauri":
+      return 1;
+    default:
+      return 0;
+  }
+}
+
+function canonicalDropPath(path) {
+  return String(path)
+    .replaceAll("\\", "/")
+    .replace(/\/+$/, "")
+    .toLowerCase();
+}
+
+function shouldIgnoreDrop(path, field, source) {
+  const prev = state.lastHandledDrop;
+  if (!prev) {
+    return false;
+  }
+  if (prev.path !== canonicalDropPath(path)) {
+    return false;
+  }
+  if (Date.now() - prev.at > 1200) {
+    return false;
+  }
+  if (prev.field === field) {
+    return true;
+  }
+  return dropSourcePriority(source) <= dropSourcePriority(prev.source);
+}
+
+function rememberHandledDrop(path, field, source) {
+  state.lastHandledDrop = {
+    path: canonicalDropPath(path),
+    field,
+    source,
+    at: Date.now(),
+  };
+}
+
+async function handleDroppedPath(rawPath, field, source = "window") {
+  if (!rawPath) {
     return;
   }
 
-  if (!el.jpgInput.value.trim()) {
-    setMessage("RAWフォルダをクリアしました", false);
-    return;
-  }
-
-  try {
-    await updatePlan("preview");
-    setMessage("RAWフォルダをクリアしプレビューを更新しました", false);
-  } catch (error) {
-    setMessage(`プレビュー生成失敗: ${toErrorMessage(error)}`, true);
-  }
-}
-
-function resolveDropField(options = {}) {
-  const { clientX, clientY, payload } = options;
-  if (Number.isFinite(clientX) && Number.isFinite(clientY)) {
-    const field = fieldFromClientPosition(clientX, clientY);
-    if (field) {
-      return field;
-    }
-  }
-
-  if (state.hoverField) {
-    return state.hoverField;
-  }
-
-  return fieldFromPayloadPosition(payload);
-}
-
-function isDuplicateDrop(path) {
-  const now = Date.now();
-  const duplicated = state.lastDropPath === path && now - state.lastDropAt < 700;
-  state.lastDropPath = path;
-  state.lastDropAt = now;
-  return duplicated;
-}
-
-async function handleDroppedPath(rawPath, field) {
-  if (!rawPath || isDuplicateDrop(rawPath)) {
+  if (shouldIgnoreDrop(rawPath, field, source)) {
     return;
   }
 
   if (!field) {
-    setHoverField(null);
-    setMessage("JPGまたはRAWの入力欄上にドロップしてください", true);
+    clearDragHoverState();
     return;
   }
 
-  state.activeDropField = field;
-  setHoverField(null);
+  clearDragHoverState();
+  state.pendingZoneDropField = null;
+  state.pendingTauriPath = null;
   await setFolderPathToField(rawPath, field);
+  rememberHandledDrop(rawPath, field, source);
 }
 
-function bindDropTarget(input, field) {
-  const row = targetRowByField(field);
+function bindDropTarget(field) {
   const zone = targetDropZoneByField(field);
-
-  const setActive = () => {
-    state.activeDropField = field;
-    setHoverField(field);
-  };
 
   const onDragOver = (event) => {
     event.preventDefault();
     event.stopPropagation();
-    setActive();
+    setHoverField(field);
   };
 
   const onDragEnter = (event) => {
     event.preventDefault();
     event.stopPropagation();
-    setActive();
+    markZoneDragEnter(field);
   };
 
   const onDragLeave = (event) => {
     event.preventDefault();
     event.stopPropagation();
     const related = event.relatedTarget;
-    if (related && row.contains(related)) {
+    if (related && zone.contains(related)) {
       return;
     }
-    if (state.hoverField === field) {
-      setHoverField(null);
-    }
+    markZoneDragLeave(field);
   };
 
   const onDrop = async (event) => {
     event.preventDefault();
     event.stopPropagation();
-    const droppedPath = extractDroppedPathFromDataTransfer(event.dataTransfer);
+    const droppedPath =
+      extractDroppedPathFromDataTransfer(event.dataTransfer) ||
+      consumePendingTauriPath(300);
     if (!droppedPath) {
-      setMessage("ドロップからパスを取得できませんでした", true);
+      rememberPendingZoneDropField(field);
       return;
     }
-    const targetField = resolveDropField({
-      clientX: event.clientX,
-      clientY: event.clientY,
-    });
-    await handleDroppedPath(droppedPath, targetField);
+    await handleDroppedPath(droppedPath, field, "zone");
   };
 
-  input.addEventListener("focus", () => {
-    state.activeDropField = field;
-  });
-  input.addEventListener("click", () => {
-    state.activeDropField = field;
-  });
-  row.addEventListener("dragenter", onDragEnter);
-  row.addEventListener("dragover", onDragOver);
-  row.addEventListener("dragleave", onDragLeave);
-  row.addEventListener("drop", onDrop);
   zone.addEventListener("dragenter", onDragEnter);
   zone.addEventListener("dragover", onDragOver);
   zone.addEventListener("dragleave", onDragLeave);
@@ -893,33 +926,31 @@ function bindDropTarget(input, field) {
 function bindWindowDomDropEvents() {
   window.addEventListener("dragover", (event) => {
     event.preventDefault();
-    const field = fieldFromClientPosition(event.clientX, event.clientY);
-    if (field) {
-      state.activeDropField = field;
-      setHoverField(field);
-      return;
-    }
-    setHoverField(null);
   });
 
   window.addEventListener("drop", async (event) => {
-    if (event.defaultPrevented) {
+    event.preventDefault();
+    const droppedPath =
+      extractDroppedPathFromDataTransfer(event.dataTransfer) ||
+      consumePendingTauriPath(300);
+    const field =
+      consumePendingZoneDropField() ||
+      recentHoverField() ||
+      fieldFromEventTarget(event.target);
+    if (droppedPath && field) {
+      await handleDroppedPath(droppedPath, field, "window");
       return;
     }
-    event.preventDefault();
-    const droppedPath = extractDroppedPathFromDataTransfer(event.dataTransfer);
-    const field = resolveDropField({
-      clientX: event.clientX,
-      clientY: event.clientY,
-    });
-    if (droppedPath) {
-      await handleDroppedPath(droppedPath, field);
-    }
+    clearDragHoverState();
+    state.pendingZoneDropField = null;
+    state.pendingTauriPath = null;
   });
 
   window.addEventListener("dragleave", (event) => {
     if (event.clientX === 0 && event.clientY === 0) {
-      setHoverField(null);
+      clearDragHoverState();
+      state.pendingZoneDropField = null;
+      state.pendingTauriPath = null;
     }
   });
 }
@@ -933,35 +964,44 @@ async function bindTauriDropEvents() {
   const onDragEnter = (event) => {
     const field = fieldFromPayloadPosition(event?.payload);
     if (field) {
-      state.activeDropField = field;
       setHoverField(field);
       return;
     }
-    setHoverField(null);
+    clearDragHoverState();
   };
 
   const onDragOver = (event) => {
     const field = fieldFromPayloadPosition(event?.payload);
     if (field) {
-      state.activeDropField = field;
       setHoverField(field);
       return;
     }
-    setHoverField(null);
+    clearDragHoverState();
   };
 
   const onDrop = async (event) => {
     const droppedPath = firstPathFromPayload(event?.payload);
     if (!droppedPath) {
+      clearDragHoverState();
       return;
     }
 
-    const field = resolveDropField({ payload: event?.payload });
-    await handleDroppedPath(droppedPath, field);
+    const field =
+      consumePendingZoneDropField() ||
+      recentHoverField() ||
+      fieldFromPayloadPosition(event?.payload);
+    if (!field) {
+      clearDragHoverState();
+      state.pendingZoneDropField = null;
+      return;
+    }
+    await handleDroppedPath(droppedPath, field, "tauri");
   };
 
   const onDragLeave = () => {
-    setHoverField(null);
+    clearDragHoverState();
+    state.pendingZoneDropField = null;
+    state.pendingTauriPath = null;
   };
 
   for (const [eventName, handler] of [
@@ -998,7 +1038,6 @@ function bindEvents() {
     renderExclusions();
     schedulePersistSettings();
     await refreshSampleRealtime();
-    await refreshPreviewOnTemplateChange("削除文字列変更を反映してプレビューを更新しました");
   });
 
   el.excludeInput.addEventListener("keydown", async (event) => {
@@ -1032,9 +1071,10 @@ function bindEvents() {
   el.jpgClearBtn.addEventListener("click", () => clearFolder("jpg"));
   el.rawBrowseBtn.addEventListener("click", () => onBrowse("raw"));
   el.rawClearBtn.addEventListener("click", () => clearFolder("raw"));
+  el.jpgInput.addEventListener("input", updateApplyButton);
 
-  bindDropTarget(el.jpgInput, "jpg");
-  bindDropTarget(el.rawInput, "raw");
+  bindDropTarget("jpg");
+  bindDropTarget("raw");
   bindWindowDomDropEvents();
 
   el.resetTemplateBtn.addEventListener("click", resetTemplateToDefault);
@@ -1064,22 +1104,10 @@ function bindEvents() {
     await onTemplateInputChanged();
   });
   el.backupOriginals.addEventListener("change", schedulePersistSettings);
-  el.rawParentIfMissing.addEventListener("change", async () => {
-    schedulePersistSettings();
-    try {
-      if (el.jpgInput.value.trim()) {
-        await updatePlan("preview", { skipSampleRefresh: true });
-        setMessage("RAW探索ルート設定を反映してプレビューを更新しました", false);
-      }
-    } catch (error) {
-      setMessage(`プレビュー生成失敗: ${toErrorMessage(error)}`, true);
-    }
-  });
+  el.rawParentIfMissing.addEventListener("change", schedulePersistSettings);
   el.dedupeSameMake.addEventListener("change", async () => {
     await refreshSampleRealtime();
-    await refreshPreviewOnTemplateChange("メーカー重複設定を反映してプレビューを更新しました");
   });
-  el.previewBtn.addEventListener("click", onPreview);
   el.applyBtn.addEventListener("click", onApply);
   el.undoBtn.addEventListener("click", onUndo);
 }
