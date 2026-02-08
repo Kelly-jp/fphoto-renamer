@@ -32,6 +32,8 @@ pub enum TemplateError {
     Empty,
     #[error("中括弧の対応が不正です")]
     UnbalancedBraces,
+    #[error("テンプレートにファイル名として使えない文字が含まれています: {0}")]
+    InvalidFilenameChar(char),
     #[error("未対応トークンです: {0}")]
     UnknownToken(String),
 }
@@ -65,6 +67,9 @@ pub fn parse_template(input: &str) -> Result<Vec<TemplatePart>, TemplateError> {
                     if next == '{' {
                         return Err(TemplateError::UnbalancedBraces);
                     }
+                    if is_disallowed_filename_char(next) {
+                        return Err(TemplateError::InvalidFilenameChar(next));
+                    }
                     token.push(next);
                 }
                 if !found_close || token.is_empty() {
@@ -73,7 +78,12 @@ pub fn parse_template(input: &str) -> Result<Vec<TemplatePart>, TemplateError> {
                 parts.push(TemplatePart::Token(parse_token(&token)?));
             }
             '}' => return Err(TemplateError::UnbalancedBraces),
-            _ => literal.push(ch),
+            _ => {
+                if is_disallowed_filename_char(ch) {
+                    return Err(TemplateError::InvalidFilenameChar(ch));
+                }
+                literal.push(ch);
+            }
         }
     }
 
@@ -207,6 +217,10 @@ fn normalize_token_value(input: &str) -> String {
     input.split_whitespace().collect::<Vec<_>>().join("-")
 }
 
+fn is_disallowed_filename_char(ch: char) -> bool {
+    matches!(ch, '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|')
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -244,6 +258,18 @@ mod tests {
     fn parse_template_invalid_brace() {
         let err = parse_template("{date").expect_err("must fail");
         assert_eq!(err, TemplateError::UnbalancedBraces);
+    }
+
+    #[test]
+    fn parse_template_rejects_invalid_filename_char_in_literal() {
+        let err = parse_template("{date}:{orig_name}").expect_err("must fail");
+        assert_eq!(err, TemplateError::InvalidFilenameChar(':'));
+    }
+
+    #[test]
+    fn parse_template_rejects_invalid_filename_char_in_token() {
+        let err = parse_template("{camera/maker}_{orig_name}").expect_err("must fail");
+        assert_eq!(err, TemplateError::InvalidFilenameChar('/'));
     }
 
     #[test]

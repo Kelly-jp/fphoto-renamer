@@ -78,6 +78,7 @@ Windows (PowerShell) の例:
 - XMP の欠損項目は RAW EXIF で補完し、さらに不足分は JPG EXIF で補完
 - 日付フォーマット: `YYYYMMDDHHMMSS`
 - テンプレート入力: 例 `"{year}{month}{day}_{hour}{minute}{second}_{camera_model}_{orig_name}"`
+- テンプレートに `\\ / : * ? " < > |` を含む場合はエラー
 - `{camera_maker}` と `{lens_maker}` が同じ場合は `{lens_maker}` を空扱い
 - 削除文字列リスト（大文字小文字非区別）
 - ファイル名の処理順: `テンプレート展開 -> 削除文字列削除 -> スペースをアンダースコアへ正規化 -> 禁止文字正規化`
