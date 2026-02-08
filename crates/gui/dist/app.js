@@ -177,11 +177,25 @@ function renderExclusions() {
       renderExclusions();
       schedulePersistSettings();
       await refreshSampleRealtime();
+      await refreshPreviewOnTemplateChange("削除文字列変更を反映してプレビューを更新しました");
     });
     li.appendChild(text);
     li.appendChild(removeBtn);
     el.excludeList.appendChild(li);
   });
+}
+
+function currentDeleteStrings() {
+  const values = [...state.exclusions];
+  const pending = el.excludeInput.value.trim();
+  if (!pending) {
+    return values;
+  }
+  if (values.some((v) => v.toLowerCase() === pending.toLowerCase())) {
+    return values;
+  }
+  values.push(pending);
+  return values;
 }
 
 function toPlanRequest() {
@@ -192,7 +206,7 @@ function toPlanRequest() {
     includeHidden: false,
     template: el.templateInput.value,
     dedupeSameMake: el.dedupeSameMake.checked,
-    exclusions: [...state.exclusions],
+    exclusions: currentDeleteStrings(),
     maxFilenameLen: 240,
   };
 }
@@ -288,7 +302,7 @@ async function refreshSampleRealtime() {
   const request = {
     template: el.templateInput.value,
     dedupeSameMake: el.dedupeSameMake.checked,
-    exclusions: [...state.exclusions],
+    exclusions: currentDeleteStrings(),
     maxFilenameLen: 240,
   };
 
@@ -339,8 +353,10 @@ async function onApply() {
     if (!valid) {
       return;
     }
+
+    await updatePlan("apply", { skipSampleRefresh: true });
     if (!state.plan) {
-      throw new Error("先にプレビューを生成してください");
+      throw new Error("プレビューを生成できませんでした");
     }
 
     const appliedNames = state.plan.candidates
@@ -389,7 +405,7 @@ async function refreshPreviewIfJpgSelected(field) {
   }
 }
 
-async function refreshPreviewOnTemplateChange() {
+async function refreshPreviewOnTemplateChange(successMessage = "テンプレート変更を反映してプレビューを更新しました") {
   if (!el.jpgInput.value.trim()) {
     return;
   }
@@ -398,7 +414,7 @@ async function refreshPreviewOnTemplateChange() {
   }
   try {
     await updatePlan("preview", { skipSampleRefresh: true });
-    setMessage("テンプレート変更を反映してプレビューを更新しました", false);
+    setMessage(successMessage, false);
   } catch (error) {
     setMessage(`プレビュー生成失敗: ${toErrorMessage(error)}`, true);
   }
@@ -856,11 +872,24 @@ function bindEvents() {
     if (!value) {
       return;
     }
+    if (state.exclusions.some((item) => item.toLowerCase() === value.toLowerCase())) {
+      el.excludeInput.value = "";
+      return;
+    }
     state.exclusions.push(value);
     el.excludeInput.value = "";
     renderExclusions();
     schedulePersistSettings();
     await refreshSampleRealtime();
+    await refreshPreviewOnTemplateChange("削除文字列変更を反映してプレビューを更新しました");
+  });
+
+  el.excludeInput.addEventListener("keydown", async (event) => {
+    if (event.key !== "Enter") {
+      return;
+    }
+    event.preventDefault();
+    el.addExcludeBtn.click();
   });
 
   el.jpgBrowseBtn.addEventListener("click", () => onBrowse("jpg"));
@@ -877,7 +906,10 @@ function bindEvents() {
     await refreshPreviewOnTemplateChange();
   });
   el.backupOriginals.addEventListener("change", schedulePersistSettings);
-  el.dedupeSameMake.addEventListener("change", refreshSampleRealtime);
+  el.dedupeSameMake.addEventListener("change", async () => {
+    await refreshSampleRealtime();
+    await refreshPreviewOnTemplateChange("メーカー重複設定を反映してプレビューを更新しました");
+  });
   el.previewBtn.addEventListener("click", onPreview);
   el.applyBtn.addEventListener("click", onApply);
   el.undoBtn.addEventListener("click", onUndo);

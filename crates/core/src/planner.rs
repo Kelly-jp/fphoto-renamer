@@ -1,8 +1,9 @@
 use crate::exif_reader::read_exif_metadata;
-use crate::matcher::{find_matching_raw, xmp_for_raw};
+use crate::matcher::{find_matching_raw, find_matching_xmp};
 use crate::metadata::{MetadataSource, PartialMetadata, PhotoMetadata};
 use crate::sanitize::{
-    apply_exclusions, cleanup_filename, sanitize_filename, truncate_filename_if_needed,
+    apply_exclusions, cleanup_filename, normalize_spaces_to_underscore, sanitize_filename,
+    truncate_filename_if_needed,
 };
 use crate::template::{parse_template, render_template_with_options};
 use crate::xmp_reader::read_xmp_metadata;
@@ -98,7 +99,8 @@ pub fn generate_plan(options: &PlanOptions) -> Result<RenamePlan> {
 
         let rendered = render_template_with_options(&parts, &metadata, options.dedupe_same_maker);
         let excluded = apply_exclusions(rendered, &options.exclusions);
-        let cleaned = cleanup_filename(&excluded);
+        let normalized_spaces = normalize_spaces_to_underscore(&excluded);
+        let cleaned = cleanup_filename(&normalized_spaces);
         let sanitized = sanitize_filename(&cleaned);
 
         let extension = jpg_path
@@ -152,7 +154,8 @@ pub fn render_preview_sample(
     let parts = parse_template(template)?;
     let rendered = render_template_with_options(&parts, metadata, dedupe_same_maker);
     let excluded = apply_exclusions(rendered, exclusions);
-    let cleaned = cleanup_filename(&excluded);
+    let normalized_spaces = normalize_spaces_to_underscore(&excluded);
+    let cleaned = cleanup_filename(&normalized_spaces);
     let sanitized = sanitize_filename(&cleaned);
     let truncated = truncate_filename_if_needed(&sanitized, extension_with_dot, max_filename_len);
     Ok(format!("{}{}", truncated, extension_with_dot))
@@ -230,60 +233,57 @@ fn resolve_metadata(
     let jpg_exif_meta = read_exif_metadata(jpg_path).ok();
 
     if let Some(raw_root) = raw_root {
-        if let Some(raw_path) = find_matching_raw(jpg_root, raw_root, jpg_path, recursive) {
-            let raw_exif = read_exif_metadata(&raw_path).ok();
+        let xmp_path = find_matching_xmp(jpg_root, raw_root, jpg_path, recursive);
+        let raw_path = find_matching_raw(jpg_root, raw_root, jpg_path, recursive);
+        let raw_exif = raw_path
+            .as_ref()
+            .and_then(|path| read_exif_metadata(path).ok());
 
-            for xmp in xmp_for_raw(&raw_path) {
-                if !xmp.exists() {
-                    continue;
-                }
-
-                match read_xmp_metadata(&xmp) {
-                    Ok(mut xmp_meta) => {
-                        let mut source = MetadataSource::Xmp;
-                        if let Some(raw) = raw_exif.as_ref() {
-                            let before = xmp_meta.clone();
-                            xmp_meta.merge_missing_from(raw);
-                            if metadata_changed(&before, &xmp_meta) {
-                                source = MetadataSource::XmpAndRawExif;
-                            }
+        if let Some(xmp_path) = xmp_path {
+            match read_xmp_metadata(&xmp_path) {
+                Ok(mut xmp_meta) => {
+                    let mut source = MetadataSource::Xmp;
+                    if let Some(raw) = raw_exif.as_ref() {
+                        let before = xmp_meta.clone();
+                        xmp_meta.merge_missing_from(raw);
+                        if metadata_changed(&before, &xmp_meta) {
+                            source = MetadataSource::XmpAndRawExif;
                         }
+                    }
 
-                        let merged = merge_with_jpg_fallback(xmp_meta, jpg_exif_meta.as_ref());
+                    let merged = merge_with_jpg_fallback(xmp_meta, jpg_exif_meta.as_ref());
+                    return Ok(to_photo_metadata(
+                        merged,
+                        source,
+                        fallback_date,
+                        original_name,
+                        jpg_path,
+                    ));
+                }
+                Err(_) => {
+                    if let Some(raw) = raw_exif.as_ref() {
+                        let merged = merge_with_jpg_fallback(raw.clone(), jpg_exif_meta.as_ref());
                         return Ok(to_photo_metadata(
                             merged,
-                            source,
+                            MetadataSource::RawExif,
                             fallback_date,
                             original_name,
                             jpg_path,
                         ));
                     }
-                    Err(_) => {
-                        if let Some(raw) = raw_exif.as_ref() {
-                            let merged =
-                                merge_with_jpg_fallback(raw.clone(), jpg_exif_meta.as_ref());
-                            return Ok(to_photo_metadata(
-                                merged,
-                                MetadataSource::RawExif,
-                                fallback_date,
-                                original_name,
-                                jpg_path,
-                            ));
-                        }
-                    }
                 }
             }
+        }
 
-            if let Some(raw) = raw_exif {
-                let merged = merge_with_jpg_fallback(raw, jpg_exif_meta.as_ref());
-                return Ok(to_photo_metadata(
-                    merged,
-                    MetadataSource::RawExif,
-                    fallback_date,
-                    original_name,
-                    jpg_path,
-                ));
-            }
+        if let Some(raw) = raw_exif {
+            let merged = merge_with_jpg_fallback(raw, jpg_exif_meta.as_ref());
+            return Ok(to_photo_metadata(
+                merged,
+                MetadataSource::RawExif,
+                fallback_date,
+                original_name,
+                jpg_path,
+            ));
         }
     }
 
@@ -404,8 +404,10 @@ fn file_modified_to_local(path: &Path) -> Option<DateTime<Local>> {
 
 #[cfg(test)]
 mod tests {
-    use super::merge_with_jpg_fallback;
-    use crate::metadata::PartialMetadata;
+    use super::{generate_plan, merge_with_jpg_fallback, PlanOptions};
+    use crate::metadata::{MetadataSource, PartialMetadata};
+    use std::fs;
+    use tempfile::tempdir;
 
     #[test]
     fn merge_with_jpg_fallback_fills_missing_fields() {
@@ -453,5 +455,41 @@ mod tests {
         assert_eq!(merged.camera_model.as_deref(), Some("A7C"));
         assert_eq!(merged.lens_make.as_deref(), Some("SIGMA"));
         assert_eq!(merged.lens_model.as_deref(), Some("35mm F2 DG DN"));
+    }
+
+    #[test]
+    fn generate_plan_uses_xmp_when_only_xmp_exists_in_raw_folder() {
+        let temp = tempdir().expect("tempdir");
+        let jpg_root = temp.path().join("jpg");
+        let raw_root = temp.path().join("raw");
+        fs::create_dir_all(&jpg_root).expect("jpg root");
+        fs::create_dir_all(&raw_root).expect("raw root");
+
+        let jpg_path = jpg_root.join("DSC00001.JPG");
+        fs::write(&jpg_path, b"not-a-real-jpg").expect("jpg file");
+
+        let xmp = raw_root.join("DSC00001.xmp");
+        fs::write(
+            &xmp,
+            r#"<x:xmpmeta><rdf:RDF><rdf:Description><exif:DateTimeOriginal>2026:02:08 10:20:30</exif:DateTimeOriginal><exif:Make>FUJIFILM</exif:Make></rdf:Description></rdf:RDF></x:xmpmeta>"#,
+        )
+        .expect("xmp file");
+
+        let plan = generate_plan(&PlanOptions {
+            jpg_input: jpg_root,
+            raw_input: Some(raw_root),
+            recursive: false,
+            include_hidden: false,
+            template: "{camera_make}_{orig_name}".to_string(),
+            dedupe_same_maker: true,
+            exclusions: Vec::new(),
+            max_filename_len: 240,
+        })
+        .expect("plan generation should succeed");
+
+        assert_eq!(plan.candidates.len(), 1);
+        let c = &plan.candidates[0];
+        assert_eq!(c.metadata_source, MetadataSource::Xmp);
+        assert_eq!(c.metadata.camera_make.as_deref(), Some("FUJIFILM"));
     }
 }

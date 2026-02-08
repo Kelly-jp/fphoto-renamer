@@ -199,13 +199,7 @@ fn format_date(metadata: &PhotoMetadata) -> String {
 fn normalize_literal_connector(input: &str) -> String {
     input
         .chars()
-        .map(|ch| {
-            if ch.is_whitespace() || ch == '-' {
-                '_'
-            } else {
-                ch
-            }
-        })
+        .map(|ch| if ch == '-' { '_' } else { ch })
         .collect()
 }
 
