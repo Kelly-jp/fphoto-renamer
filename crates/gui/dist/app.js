@@ -41,6 +41,7 @@ const el = {
   jpgClearBtn: document.getElementById("jpgClearBtn"),
   rawBrowseBtn: document.getElementById("rawBrowseBtn"),
   rawClearBtn: document.getElementById("rawClearBtn"),
+  rawParentIfMissing: document.getElementById("rawParentIfMissing"),
   templateInput: document.getElementById("templateInput"),
   resetTemplateBtn: document.getElementById("resetTemplateBtn"),
   dedupeSameMake: document.getElementById("dedupeSameMake"),
@@ -99,6 +100,9 @@ async function loadPersistedSettings() {
     if (settings && typeof settings.backupOriginals === "boolean") {
       el.backupOriginals.checked = settings.backupOriginals;
     }
+    if (settings && typeof settings.rawParentIfMissing === "boolean") {
+      el.rawParentIfMissing.checked = settings.rawParentIfMissing;
+    }
   } catch (error) {
     setMessage(`設定読み込み失敗: ${toErrorMessage(error)}`, true);
   }
@@ -110,6 +114,7 @@ async function persistSettings() {
       template: el.templateInput.value,
       exclusions: [...state.exclusions],
       backupOriginals: el.backupOriginals.checked,
+      rawParentIfMissing: el.rawParentIfMissing.checked,
     },
   });
 }
@@ -206,6 +211,7 @@ function toPlanRequest() {
   return {
     jpgInput: el.jpgInput.value.trim(),
     rawInput: el.rawInput.value.trim() || null,
+    rawParentIfMissing: el.rawParentIfMissing.checked,
     recursive: false,
     includeHidden: false,
     template: el.templateInput.value,
@@ -949,6 +955,17 @@ function bindEvents() {
     await refreshPreviewOnTemplateChange();
   });
   el.backupOriginals.addEventListener("change", schedulePersistSettings);
+  el.rawParentIfMissing.addEventListener("change", async () => {
+    schedulePersistSettings();
+    try {
+      if (el.jpgInput.value.trim()) {
+        await updatePlan("preview", { skipSampleRefresh: true });
+        setMessage("RAW探索ルート設定を反映してプレビューを更新しました", false);
+      }
+    } catch (error) {
+      setMessage(`プレビュー生成失敗: ${toErrorMessage(error)}`, true);
+    }
+  });
   el.dedupeSameMake.addEventListener("change", async () => {
     await refreshSampleRealtime();
     await refreshPreviewOnTemplateChange("メーカー重複設定を反映してプレビューを更新しました");

@@ -20,6 +20,7 @@ use walkdir::WalkDir;
 pub struct PlanOptions {
     pub jpg_input: PathBuf,
     pub raw_input: Option<PathBuf>,
+    pub raw_from_jpg_parent_when_missing: bool,
     pub recursive: bool,
     pub include_hidden: bool,
     pub template: String,
@@ -33,6 +34,7 @@ impl Default for PlanOptions {
         Self {
             jpg_input: PathBuf::new(),
             raw_input: None,
+            raw_from_jpg_parent_when_missing: false,
             recursive: false,
             include_hidden: false,
             template: DEFAULT_TEMPLATE.to_string(),
@@ -78,6 +80,7 @@ pub fn generate_plan(options: &PlanOptions) -> Result<RenamePlan> {
     }
 
     let parts = parse_template(&options.template)?;
+    let effective_raw_input = resolve_effective_raw_input(options);
     let mut stats = RenameStats::default();
     let jpg_files = collect_jpg_files(
         &options.jpg_input,
@@ -92,7 +95,7 @@ pub fn generate_plan(options: &PlanOptions) -> Result<RenamePlan> {
     for jpg_path in jpg_files {
         let metadata = resolve_metadata(
             &options.jpg_input,
-            options.raw_input.as_deref(),
+            effective_raw_input.as_deref(),
             &jpg_path,
             options.recursive,
         )?;
@@ -141,6 +144,18 @@ pub fn generate_plan(options: &PlanOptions) -> Result<RenamePlan> {
         candidates,
         stats,
     })
+}
+
+fn resolve_effective_raw_input(options: &PlanOptions) -> Option<PathBuf> {
+    if let Some(raw_input) = options.raw_input.as_ref() {
+        return Some(raw_input.clone());
+    }
+
+    if !options.raw_from_jpg_parent_when_missing {
+        return None;
+    }
+
+    options.jpg_input.parent().map(PathBuf::from)
 }
 
 pub fn render_preview_sample(
@@ -477,6 +492,43 @@ mod tests {
         let plan = generate_plan(&PlanOptions {
             jpg_input: jpg_root,
             raw_input: Some(raw_root),
+            raw_from_jpg_parent_when_missing: false,
+            recursive: false,
+            include_hidden: false,
+            template: "{camera_maker}_{orig_name}".to_string(),
+            dedupe_same_maker: true,
+            exclusions: Vec::new(),
+            max_filename_len: 240,
+        })
+        .expect("plan generation should succeed");
+
+        assert_eq!(plan.candidates.len(), 1);
+        let c = &plan.candidates[0];
+        assert_eq!(c.metadata_source, MetadataSource::Xmp);
+        assert_eq!(c.metadata.camera_make.as_deref(), Some("FUJIFILM"));
+    }
+
+    #[test]
+    fn generate_plan_uses_jpg_parent_as_raw_when_enabled() {
+        let temp = tempdir().expect("tempdir");
+        let parent_root = temp.path().join("session");
+        let jpg_root = parent_root.join("jpg");
+        fs::create_dir_all(&jpg_root).expect("jpg root");
+
+        let jpg_path = jpg_root.join("DSC00010.JPG");
+        fs::write(&jpg_path, b"not-a-real-jpg").expect("jpg file");
+
+        let xmp = parent_root.join("DSC00010.xmp");
+        fs::write(
+            &xmp,
+            r#"<x:xmpmeta><rdf:RDF><rdf:Description><exif:DateTimeOriginal>2026:02:08 10:20:30</exif:DateTimeOriginal><exif:Make>FUJIFILM</exif:Make></rdf:Description></rdf:RDF></x:xmpmeta>"#,
+        )
+        .expect("xmp file");
+
+        let plan = generate_plan(&PlanOptions {
+            jpg_input: jpg_root,
+            raw_input: None,
+            raw_from_jpg_parent_when_missing: true,
             recursive: false,
             include_hidden: false,
             template: "{camera_maker}_{orig_name}".to_string(),

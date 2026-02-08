@@ -39,6 +39,8 @@ struct RenameArgs {
     #[arg(long)]
     raw_input: Option<String>,
     #[arg(long, default_value_t = false)]
+    raw_parent_if_missing: bool,
+    #[arg(long, default_value_t = false)]
     apply: bool,
     #[arg(
         long,
@@ -79,6 +81,7 @@ fn cmd_rename(args: RenameArgs) -> Result<()> {
     let options = PlanOptions {
         jpg_input: args.jpg_input.into(),
         raw_input: args.raw_input.map(Into::into),
+        raw_from_jpg_parent_when_missing: args.raw_parent_if_missing,
         recursive: false,
         include_hidden: false,
         template: args.template,

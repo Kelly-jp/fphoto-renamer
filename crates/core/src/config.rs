@@ -15,6 +15,8 @@ pub struct AppConfig {
     pub exclude_strings: Vec<String>,
     #[serde(default)]
     pub backup_originals: bool,
+    #[serde(default)]
+    pub raw_parent_if_missing: bool,
 }
 
 impl Default for AppConfig {
@@ -27,6 +29,7 @@ impl Default for AppConfig {
             template: DEFAULT_TEMPLATE.to_string(),
             exclude_strings: Vec::new(),
             backup_originals: false,
+            raw_parent_if_missing: false,
         }
     }
 }

@@ -16,6 +16,8 @@ use tauri::Manager;
 struct PlanRequest {
     jpg_input: String,
     raw_input: Option<String>,
+    #[serde(default)]
+    raw_parent_if_missing: bool,
     recursive: bool,
     include_hidden: bool,
     template: String,
@@ -53,6 +55,7 @@ struct GuiSettingsResponse {
     template: String,
     exclusions: Vec<String>,
     backup_originals: bool,
+    raw_parent_if_missing: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -62,6 +65,8 @@ struct SaveGuiSettingsRequest {
     exclusions: Vec<String>,
     #[serde(default)]
     backup_originals: bool,
+    #[serde(default)]
+    raw_parent_if_missing: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -81,6 +86,7 @@ fn generate_plan_cmd(request: PlanRequest) -> Result<RenamePlan, String> {
     let options = PlanOptions {
         jpg_input: request.jpg_input.into(),
         raw_input: request.raw_input.map(Into::into),
+        raw_from_jpg_parent_when_missing: request.raw_parent_if_missing,
         recursive: request.recursive,
         include_hidden: request.include_hidden,
         template: request.template,
@@ -147,6 +153,7 @@ fn load_gui_settings_cmd() -> Result<GuiSettingsResponse, String> {
         template: config.template,
         exclusions: config.exclude_strings,
         backup_originals: config.backup_originals,
+        raw_parent_if_missing: config.raw_parent_if_missing,
     })
 }
 
@@ -156,6 +163,7 @@ fn save_gui_settings_cmd(request: SaveGuiSettingsRequest) -> Result<(), String> 
     config.template = request.template;
     config.exclude_strings = request.exclusions;
     config.backup_originals = request.backup_originals;
+    config.raw_parent_if_missing = request.raw_parent_if_missing;
     save_config(&config).map_err(|err| err.to_string())
 }
 
