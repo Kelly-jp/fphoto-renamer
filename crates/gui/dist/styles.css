@@ -188,6 +188,24 @@ button:disabled {
   gap: 6px;
 }
 
+.exclude-list li button {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: #64748b;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.exclude-list li button:hover {
+  background: #dbe4ee;
+  color: #1e293b;
+}
+
 .actions {
   display: flex;
   gap: 8px;

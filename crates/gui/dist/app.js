@@ -173,7 +173,9 @@ function renderExclusions() {
     text.textContent = item;
     const removeBtn = document.createElement("button");
     removeBtn.type = "button";
-    removeBtn.textContent = "削除";
+    removeBtn.textContent = "×";
+    removeBtn.title = "削除";
+    removeBtn.setAttribute("aria-label", "削除");
     removeBtn.addEventListener("click", async () => {
       state.exclusions.splice(idx, 1);
       renderExclusions();
