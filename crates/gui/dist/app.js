@@ -15,11 +15,14 @@ const TOKENS = [
 
 const DEFAULT_TEMPLATE =
   "{year}{month}{day}_{hour}{minute}{second}_{camera_maker}_{camera_model}_{lens_maker}_{lens_model}_{film_sim}_{orig_name}";
+const TEMPLATE_DISALLOWED_CHAR = /[\\/:*?"<>|]/;
+const TEMPLATE_DISALLOWED_CHAR_GLOBAL = /[\\/:*?"<>|]/g;
 
 const state = {
   exclusions: [],
   plan: null,
   templateValid: false,
+  templateValidationMessage: "",
   activeDropField: "jpg",
   hoverField: null,
   lastDropPath: null,
@@ -94,7 +97,7 @@ async function loadPersistedSettings() {
     if (settings && Array.isArray(settings.exclusions)) {
       state.exclusions = settings.exclusions
         .filter((value) => typeof value === "string")
-        .map((value) => value.trim())
+        .map((value) => removeDisallowedTemplateChars(value).trim())
         .filter((value) => value.length > 0);
     }
     if (settings && typeof settings.backupOriginals === "boolean") {
@@ -133,6 +136,58 @@ function schedulePersistSettings() {
 function setMessage(text, isError = false) {
   el.message.textContent = text;
   el.message.style.color = isError ? "#dc2626" : "#0f5132";
+}
+
+function removeDisallowedTemplateChars(value) {
+  return String(value).replace(TEMPLATE_DISALLOWED_CHAR_GLOBAL, "");
+}
+
+function countDisallowedTemplateChars(value) {
+  const matched = String(value).match(TEMPLATE_DISALLOWED_CHAR_GLOBAL);
+  return matched ? matched.length : 0;
+}
+
+function sanitizeTextInputInPlace(input) {
+  const current = input.value;
+  const sanitized = removeDisallowedTemplateChars(current);
+  if (sanitized === current) {
+    return false;
+  }
+
+  const start = input.selectionStart ?? current.length;
+  const end = input.selectionEnd ?? current.length;
+  const removedBeforeStart = countDisallowedTemplateChars(current.slice(0, start));
+  const removedBeforeEnd = countDisallowedTemplateChars(current.slice(0, end));
+  const nextStart = Math.max(0, start - removedBeforeStart);
+  const nextEnd = Math.max(0, end - removedBeforeEnd);
+
+  input.value = sanitized;
+  input.setSelectionRange(nextStart, nextEnd);
+  return true;
+}
+
+function sanitizeTemplateInputInPlace() {
+  return sanitizeTextInputInPlace(el.templateInput);
+}
+
+function sanitizeExcludeInputInPlace() {
+  return sanitizeTextInputInPlace(el.excludeInput);
+}
+
+function insertTextAtSelection(input, text) {
+  const start = input.selectionStart ?? input.value.length;
+  const end = input.selectionEnd ?? input.value.length;
+  const before = input.value.slice(0, start);
+  const after = input.value.slice(end);
+  input.value = `${before}${text}${after}`;
+  const nextCursor = start + text.length;
+  input.setSelectionRange(nextCursor, nextCursor);
+}
+
+async function onTemplateInputChanged() {
+  schedulePersistSettings();
+  await refreshSampleRealtime();
+  await refreshPreviewOnTemplateChange();
 }
 
 function insertTokenAtCursor(token) {
@@ -196,7 +251,7 @@ function renderExclusions() {
 
 function currentDeleteStrings() {
   const values = [...state.exclusions];
-  const pending = el.excludeInput.value.trim();
+  const pending = removeDisallowedTemplateChars(el.excludeInput.value).trim();
   if (!pending) {
     return values;
   }
@@ -231,7 +286,7 @@ function renderPlan(plan) {
     const originalName = basename(row.original_path);
     const targetName = basename(row.target_path);
     const status = rowStatus(row, originalName);
-    if (status === "更新済み") {
+    if (status === "変換済み") {
       updatedCount += 1;
     } else if (status.startsWith("スキップ")) {
       skippedCount += 1;
@@ -247,7 +302,7 @@ function renderPlan(plan) {
     el.planRows.appendChild(tr);
   }
 
-  el.stats.textContent = `件数: 全件数=${plan.candidates.length} 更新済み=${updatedCount} スキップ=${skippedCount} エラー=${errorCount}`;
+  el.stats.textContent = `件数: 全件数=${plan.candidates.length} 変換済み=${updatedCount} スキップ=${skippedCount} エラー=${errorCount}`;
 }
 
 function escapeHtml(value) {
@@ -279,10 +334,10 @@ function rowStatus(row, originalName) {
     return `エラー: ${errorMessage}`;
   }
   if (state.recentlyAppliedNames.has(originalName)) {
-    return "更新済み";
+    return "変換済み";
   }
   if (row.changed) {
-    return "更新予定";
+    return "未変換";
   }
   return "スキップ(同名)";
 }
@@ -291,21 +346,28 @@ async function validateTemplate() {
   try {
     await invokeCommand("validate_template_cmd", { template: el.templateInput.value });
     state.templateValid = true;
+    state.templateValidationMessage = "";
     el.templateError.textContent = "";
     return true;
   } catch (error) {
     state.templateValid = false;
-    el.templateError.textContent = `テンプレートエラー: ${toErrorMessage(error)}`;
+    state.templateValidationMessage = `テンプレートエラー: ${toErrorMessage(error)}`;
+    el.templateError.textContent = "";
     return false;
   } finally {
     updateApplyButton();
   }
 }
 
+function setSampleText(message, isError = false) {
+  el.sample.textContent = `出力サンプル: ${message}`;
+  el.sample.classList.toggle("sample-error", isError);
+}
+
 async function refreshSampleRealtime() {
   const valid = await validateTemplate();
   if (!valid) {
-    el.sample.textContent = "出力サンプル: (テンプレートエラー)";
+    setSampleText(state.templateValidationMessage || "(テンプレートエラー)", true);
     return;
   }
 
@@ -318,9 +380,9 @@ async function refreshSampleRealtime() {
 
   try {
     const sample = await invokeCommand("render_fixed_sample_cmd", { request });
-    el.sample.textContent = `出力サンプル: ${sample}`;
+    setSampleText(sample, false);
   } catch (error) {
-    el.sample.textContent = `出力サンプル: エラー (${toErrorMessage(error)})`;
+    setSampleText(`エラー (${toErrorMessage(error)})`, true);
   }
 }
 
@@ -922,7 +984,8 @@ async function bindTauriDropEvents() {
 
 function bindEvents() {
   el.addExcludeBtn.addEventListener("click", async () => {
-    const value = el.excludeInput.value.trim();
+    const value = removeDisallowedTemplateChars(el.excludeInput.value).trim();
+    el.excludeInput.value = value;
     if (!value) {
       return;
     }
@@ -939,11 +1002,30 @@ function bindEvents() {
   });
 
   el.excludeInput.addEventListener("keydown", async (event) => {
+    if (!event.ctrlKey && !event.metaKey && !event.altKey) {
+      if (event.key.length === 1 && TEMPLATE_DISALLOWED_CHAR.test(event.key)) {
+        event.preventDefault();
+        return;
+      }
+    }
     if (event.key !== "Enter") {
       return;
     }
     event.preventDefault();
     el.addExcludeBtn.click();
+  });
+  el.excludeInput.addEventListener("paste", (event) => {
+    const text = event.clipboardData?.getData("text/plain");
+    if (typeof text !== "string") {
+      return;
+    }
+    event.preventDefault();
+    const sanitized = removeDisallowedTemplateChars(text);
+    insertTextAtSelection(el.excludeInput, sanitized);
+    sanitizeExcludeInputInPlace();
+  });
+  el.excludeInput.addEventListener("input", () => {
+    sanitizeExcludeInputInPlace();
   });
 
   el.jpgBrowseBtn.addEventListener("click", () => onBrowse("jpg"));
@@ -956,10 +1038,30 @@ function bindEvents() {
   bindWindowDomDropEvents();
 
   el.resetTemplateBtn.addEventListener("click", resetTemplateToDefault);
+  el.templateInput.addEventListener("keydown", (event) => {
+    if (event.ctrlKey || event.metaKey || event.altKey) {
+      return;
+    }
+    if (event.key.length !== 1) {
+      return;
+    }
+    if (TEMPLATE_DISALLOWED_CHAR.test(event.key)) {
+      event.preventDefault();
+    }
+  });
+  el.templateInput.addEventListener("paste", async (event) => {
+    const text = event.clipboardData?.getData("text/plain");
+    if (typeof text !== "string") {
+      return;
+    }
+    event.preventDefault();
+    const sanitized = removeDisallowedTemplateChars(text);
+    insertTextAtSelection(el.templateInput, sanitized);
+    await onTemplateInputChanged();
+  });
   el.templateInput.addEventListener("input", async () => {
-    schedulePersistSettings();
-    await refreshSampleRealtime();
-    await refreshPreviewOnTemplateChange();
+    sanitizeTemplateInputInPlace();
+    await onTemplateInputChanged();
   });
   el.backupOriginals.addEventListener("change", schedulePersistSettings);
   el.rawParentIfMissing.addEventListener("change", async () => {
@@ -986,6 +1088,7 @@ async function init() {
   renderTokenButtons();
   bindEvents();
   await loadPersistedSettings();
+  sanitizeTemplateInputInPlace();
   renderExclusions();
   await bindTauriDropEvents();
   await refreshSampleRealtime();

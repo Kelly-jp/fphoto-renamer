@@ -169,6 +169,10 @@ button:disabled {
   font-weight: 600;
 }
 
+.sample.sample-error {
+  color: #dc2626;
+}
+
 .exclude-list {
   margin: 10px 0 0;
   padding: 0;

@@ -17,7 +17,7 @@
         <div id="jpgRow" class="row">
           <label for="jpgInput">JPGフォルダ</label>
           <div id="jpgDropZone" class="drop-input-wrap">
-            <input id="jpgInput" class="drop-target" type="text" placeholder="/path/to/jpg" />
+            <input id="jpgInput" class="drop-target" type="text" placeholder="JPGフォルダを選択もしくはドラッグ&ドロップ" />
             <div class="drop-overlay">ここにドロップすると JPG フォルダに設定されます</div>
           </div>
           <div class="folder-actions">
@@ -28,7 +28,7 @@
         <div id="rawRow" class="row">
           <label for="rawInput">RAWフォルダ (任意)</label>
           <div id="rawDropZone" class="drop-input-wrap">
-            <input id="rawInput" class="drop-target" type="text" placeholder="/path/to/raw" />
+            <input id="rawInput" class="drop-target" type="text" placeholder="RAWフォルダを選択もしくはドラッグ&ドロップ" />
             <div class="drop-overlay">ここにドロップすると RAW フォルダに設定されます</div>
           </div>
           <div class="folder-actions">
@@ -36,7 +36,6 @@
             <button id="rawClearBtn" type="button">クリア</button>
           </div>
         </div>
-        <p class="drop-help">フォルダを入力欄へドラッグ＆ドロップして設定できます。</p>
         <label class="inline-check">
           <input id="rawParentIfMissing" type="checkbox" />
           RAWフォルダ未指定時はJPGフォルダの1つ上の階層をRAW探索ルートとして扱う
