@@ -328,12 +328,17 @@ function updateApplyButton() {
   el.applyBtn.disabled = !(state.templateValid && state.plan);
 }
 
+function setUndoButtonEnabled(enabled) {
+  el.undoBtn.disabled = !enabled;
+}
+
 function clearPlanState() {
   state.plan = null;
   state.recentlyAppliedNames.clear();
   el.planRows.innerHTML = "";
   el.stats.textContent = "件数: -";
   updateApplyButton();
+  setUndoButtonEnabled(false);
 }
 
 async function updatePlan(reason = "preview", options = {}) {
@@ -389,6 +394,7 @@ async function onApply() {
       },
     });
     setMessage(`適用完了: ${result.applied}件`, false);
+    setUndoButtonEnabled(result.applied > 0);
     await updatePlan("after_apply");
   } catch (error) {
     state.recentlyAppliedNames.clear();
@@ -399,12 +405,13 @@ async function onApply() {
 async function onUndo() {
   try {
     const result = await invokeCommand("undo_last_cmd");
-    setMessage(`取り消し完了: ${result.restored}件`, false);
+    setMessage(`元に戻し完了: ${result.restored}件`, false);
+    setUndoButtonEnabled(false);
     if (el.jpgInput.value.trim()) {
       await updatePlan("preview");
     }
   } catch (error) {
-    setMessage(`取り消し失敗: ${toErrorMessage(error)}`, true);
+    setMessage(`元に戻し失敗: ${toErrorMessage(error)}`, true);
   }
 }
 
