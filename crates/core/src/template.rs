@@ -166,9 +166,9 @@ fn parse_token(token: &str) -> Result<Token, TemplateError> {
         "hour" => Ok(Token::Hour),
         "minute" => Ok(Token::Minute),
         "second" => Ok(Token::Second),
-        "camera_make" => Ok(Token::CameraMake),
+        "camera_maker" => Ok(Token::CameraMake),
         "camera_model" => Ok(Token::CameraModel),
-        "lens_make" => Ok(Token::LensMake),
+        "lens_maker" => Ok(Token::LensMake),
         "lens_model" => Ok(Token::LensModel),
         "film_sim" => Ok(Token::FilmSim),
         "orig_name" => Ok(Token::OrigName),
@@ -248,16 +248,25 @@ mod tests {
 
     #[test]
     fn render_dedupes_lens_maker() {
-        let parsed = parse_template("{camera_make}_{lens_make}_{lens_model}").expect("must parse");
+        let parsed =
+            parse_template("{camera_maker}_{lens_maker}_{lens_model}").expect("must parse");
         let rendered = render_template_with_options(&parsed, &metadata(), true);
         assert_eq!(rendered, "FUJIFILM__XF33mmF1.4");
     }
 
     #[test]
     fn render_keeps_lens_maker_when_dedupe_off() {
-        let parsed = parse_template("{camera_make}_{lens_make}_{lens_model}").expect("must parse");
+        let parsed =
+            parse_template("{camera_maker}_{lens_maker}_{lens_model}").expect("must parse");
         let rendered = render_template_with_options(&parsed, &metadata(), false);
         assert_eq!(rendered, "FUJIFILM_fujifilm_XF33mmF1.4");
+    }
+
+    #[test]
+    fn parse_template_rejects_legacy_make_tokens() {
+        let err = parse_template("{camera_make}_{lens_make}")
+            .expect_err("legacy token names must be rejected");
+        assert!(matches!(err, TemplateError::UnknownToken(_)));
     }
 
     #[test]

@@ -1,8 +1,9 @@
 use anyhow::Result;
+use clap::ArgAction;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use fphoto_renamer_core::{
-    app_paths, apply_plan, generate_plan, load_config, parse_template, undo_last, PlanOptions,
-    DEFAULT_TEMPLATE,
+    app_paths, apply_plan_with_options, generate_plan, load_config, parse_template, undo_last,
+    ApplyOptions, PlanOptions, DEFAULT_TEMPLATE,
 };
 
 #[derive(Debug, Parser)]
@@ -38,24 +39,20 @@ struct RenameArgs {
     #[arg(long)]
     raw_input: Option<String>,
     #[arg(long, default_value_t = false)]
-    recursive: bool,
-    #[arg(long, default_value_t = false)]
-    include_hidden: bool,
-    #[arg(long, default_value_t = false)]
     apply: bool,
     #[arg(
         long,
         default_value = DEFAULT_TEMPLATE
     )]
     template: String,
-    #[arg(long)]
+    #[arg(long, allow_hyphen_values = true)]
     exclude: Vec<String>,
+    #[arg(long = "dedupe-same-maker", default_value_t = true, action = ArgAction::Set)]
+    dedupe_same_maker: bool,
+    #[arg(long, default_value_t = false)]
+    backup_originals: bool,
     #[arg(long, value_enum, default_value_t = OutputFormat::Table)]
     output: OutputFormat,
-    #[arg(long)]
-    tokens: Option<String>,
-    #[arg(long)]
-    delimiter: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -77,19 +74,15 @@ fn main() -> Result<()> {
 }
 
 fn cmd_rename(args: RenameArgs) -> Result<()> {
-    if args.tokens.is_some() || args.delimiter.is_some() {
-        anyhow::bail!("--tokens / --delimiter は廃止されました。--template を使用してください。");
-    }
-
     parse_template(&args.template)?;
 
     let options = PlanOptions {
         jpg_input: args.jpg_input.into(),
         raw_input: args.raw_input.map(Into::into),
-        recursive: args.recursive,
-        include_hidden: args.include_hidden,
+        recursive: false,
+        include_hidden: false,
         template: args.template,
-        dedupe_same_maker: true,
+        dedupe_same_maker: args.dedupe_same_maker,
         exclusions: args.exclude,
         max_filename_len: 240,
     };
@@ -106,13 +99,18 @@ fn cmd_rename(args: RenameArgs) -> Result<()> {
     }
 
     if args.apply {
-        let result = apply_plan(&plan)?;
+        let result = apply_plan_with_options(
+            &plan,
+            &ApplyOptions {
+                backup_originals: args.backup_originals,
+            },
+        )?;
         eprintln!(
             "適用完了: {}件 (変更なし {}件)",
             result.applied, result.unchanged
         );
     } else {
-        eprintln!("dry-runモード: 実ファイルは変更していません。適用するには --apply を指定してください。");
+        eprintln!("dry-run: リネームは未実行です。実行する場合は --apply を指定してください。");
     }
 
     Ok(())
@@ -144,12 +142,10 @@ fn print_table(plan: &fphoto_renamer_core::RenamePlan) {
     }
 
     println!(
-        "\n集計: scanned={} jpg={} non_jpg_skip={} hidden_skip={} planned={} unchanged={}",
+        "\n集計: scanned={} jpg={} non_jpg_skip={} unchanged={}",
         plan.stats.scanned_files,
         plan.stats.jpg_files,
         plan.stats.skipped_non_jpg,
-        plan.stats.skipped_hidden,
-        plan.stats.planned,
         plan.stats.unchanged
     );
 }

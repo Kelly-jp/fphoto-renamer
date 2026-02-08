@@ -177,12 +177,11 @@ fn collect_jpg_files(
             if path.is_dir() {
                 continue;
             }
-            stats.scanned_files += 1;
-
             if is_hidden(path) && !include_hidden {
                 stats.skipped_hidden += 1;
                 continue;
             }
+            stats.scanned_files += 1;
 
             if is_jpg(path) {
                 stats.jpg_files += 1;
@@ -201,11 +200,11 @@ fn collect_jpg_files(
             if path.is_dir() {
                 continue;
             }
-            stats.scanned_files += 1;
             if is_hidden(&path) && !include_hidden {
                 stats.skipped_hidden += 1;
                 continue;
             }
+            stats.scanned_files += 1;
             if is_jpg(&path) {
                 stats.jpg_files += 1;
                 out.push(path);
@@ -480,7 +479,7 @@ mod tests {
             raw_input: Some(raw_root),
             recursive: false,
             include_hidden: false,
-            template: "{camera_make}_{orig_name}".to_string(),
+            template: "{camera_maker}_{orig_name}".to_string(),
             dedupe_same_maker: true,
             exclusions: Vec::new(),
             max_filename_len: 240,

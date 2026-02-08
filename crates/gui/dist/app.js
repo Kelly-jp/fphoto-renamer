@@ -5,16 +5,16 @@ const TOKENS = [
   { token: "{hour}", label: "時" },
   { token: "{minute}", label: "分" },
   { token: "{second}", label: "秒" },
-  { token: "{camera_make}", label: "カメラメーカー名" },
+  { token: "{camera_maker}", label: "カメラメーカー名" },
   { token: "{camera_model}", label: "カメラ名" },
-  { token: "{lens_make}", label: "レンズメーカー名" },
+  { token: "{lens_maker}", label: "レンズメーカー名" },
   { token: "{lens_model}", label: "レンズ名" },
   { token: "{film_sim}", label: "フィルムシミュレーション名" },
   { token: "{orig_name}", label: "元ファイル名" },
 ];
 
 const DEFAULT_TEMPLATE =
-  "{year}{month}{day}_{hour}{minute}{second}_{camera_make}_{camera_model}_{lens_make}_{lens_model}_{film_sim}_{orig_name}";
+  "{year}{month}{day}_{hour}{minute}{second}_{camera_maker}_{camera_model}_{lens_maker}_{lens_model}_{film_sim}_{orig_name}";
 
 const state = {
   exclusions: [],

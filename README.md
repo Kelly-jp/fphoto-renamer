@@ -72,24 +72,33 @@ Windows (PowerShell) の例:
 ## 機能
 
 - JPG フォルダ必須、RAW フォルダ任意
+- RAW フォルダ指定時は同名ベースで探索し、優先順位は `XMP -> DNG -> RAF`
 - メタデータ取得優先順位: `XMP -> RAW EXIF -> JPG EXIF`
+- XMP の欠損項目は RAW EXIF で補完し、さらに不足分は JPG EXIF で補完
 - 日付フォーマット: `YYYYMMDDHHMMSS`
 - テンプレート入力: 例 `"{year}{month}{day}_{hour}{minute}{second}_{camera_model}_{orig_name}"`
-- `{camera_make}` と `{lens_make}` が同じ場合は `{lens_make}` を空扱い
-- 除外文字列リスト（大文字小文字非区別）
+- `{camera_maker}` と `{lens_maker}` が同じ場合は `{lens_maker}` を空扱い
+- 削除文字列リスト（大文字小文字非区別）
+- ファイル名の処理順: `テンプレート展開 -> 削除文字列削除 -> スペースをアンダースコアへ正規化 -> 禁止文字正規化`
+- 削除文字列はスペース/ハイフン/アンダースコアの揺れを吸収して削除
 - Windows/macOS 禁止文字の正規化
 - GUI の「バックアップ」チェックONで、適用時に `JPGフォルダ/backup` へ元ファイルをバックアップ
+- GUI はフォルダ選択・ドラッグ＆ドロップ・クリアボタンに対応
 - dry-run 既定、`--apply` で適用
 - 直近1回の undo
 
 ## CLI
 
+`--tokens` / `--delimiter` は廃止済みです。`--template` を使用してください。
+
 ```bash
 cargo run -p fphoto-renamer-cli -- rename \
   --jpg-input /path/to/jpg \
   --raw-input /path/to/raw \
-  --template "{year}{month}{day}_{hour}{minute}{second}_{camera_model}_{orig_name}" \
-  --exclude "FUJIFILM"
+  --template "{year}{month}{day}_{hour}{minute}{second}_{camera_maker}_{camera_model}_{lens_maker}_{lens_model}_{film_sim}_{orig_name}" \
+  --exclude "-強化-NR" \
+  --exclude "-DxO_DeepPRIME XD2s_XD"
+
 ```
 
 適用する場合:
@@ -112,6 +121,8 @@ cargo run -p fphoto-renamer-gui
 
 GUI では書式テキストを入力し、トークンボタンでカーソル位置へ挿入できます。
 出力サンプルはリアルタイム表示されます。
+JPG/RAW フォルダは「選択」「ドラッグ＆ドロップ」「クリア」で設定できます。
+削除文字列はチップとして管理し、`×` ボタンで削除できます。
 GUI は Tauri + HTML/CSS/JavaScript で実装しています。
 
 ## ExifTool の指定
