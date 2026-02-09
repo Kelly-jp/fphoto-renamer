@@ -7,10 +7,6 @@ use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
-    pub date_format: String,
-    pub recursive_default: bool,
-    pub include_hidden_default: bool,
-    pub language: String,
     pub template: String,
     pub exclude_strings: Vec<String>,
     #[serde(default)]
@@ -22,10 +18,6 @@ pub struct AppConfig {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            date_format: "YYYYMMDDHHMMSS".to_string(),
-            recursive_default: false,
-            include_hidden_default: false,
-            language: "ja".to_string(),
             template: DEFAULT_TEMPLATE.to_string(),
             exclude_strings: Vec::new(),
             backup_originals: false,
@@ -95,10 +87,6 @@ mod tests {
     #[test]
     fn default_config_has_expected_values() {
         let cfg = AppConfig::default();
-        assert_eq!(cfg.date_format, "YYYYMMDDHHMMSS");
-        assert!(!cfg.recursive_default);
-        assert!(!cfg.include_hidden_default);
-        assert_eq!(cfg.language, "ja");
         assert_eq!(cfg.template, DEFAULT_TEMPLATE);
         assert!(cfg.exclude_strings.is_empty());
         assert!(!cfg.backup_originals);
@@ -116,9 +104,6 @@ template = "{orig_name}"
 exclude_strings = ["-NR"]
 "#;
         let cfg: AppConfig = toml::from_str(raw).expect("legacy config should deserialize");
-        assert_eq!(cfg.date_format, "YYYYMMDDHHMMSS");
-        assert!(cfg.recursive_default);
-        assert!(!cfg.include_hidden_default);
         assert_eq!(cfg.template, "{orig_name}");
         assert_eq!(cfg.exclude_strings, vec!["-NR"]);
         assert!(!cfg.backup_originals);

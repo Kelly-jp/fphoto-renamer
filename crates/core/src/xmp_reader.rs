@@ -1,21 +1,40 @@
 use crate::metadata::PartialMetadata;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Local, NaiveDateTime, TimeZone};
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
+
+const TARGET_XMP_KEYS: &[&str] = &[
+    "datetimeoriginal",
+    "createdate",
+    "datecreated",
+    "make",
+    "model",
+    "lensmake",
+    "lensmodel",
+    "lens",
+    "filmsimulation",
+    "filmmode",
+    "filmsimulationname",
+];
 
 pub fn read_xmp_metadata(path: &Path) -> Result<PartialMetadata> {
     let xml = fs::read_to_string(path)
         .with_context(|| format!("XMPを開けませんでした: {}", path.display()))?;
+    let values = collect_tag_values(&xml);
 
-    let date = find_value(&xml, &["datetimeoriginal", "createdate", "datecreated"])
+    let date = pick_value(&values, &["datetimeoriginal", "createdate", "datecreated"])
         .as_deref()
         .and_then(parse_date);
-    let camera_make = find_value(&xml, &["make"]);
-    let camera_model = find_value(&xml, &["model"]);
-    let lens_make = find_value(&xml, &["lensmake"]);
-    let lens_model = find_value(&xml, &["lensmodel", "lens"]);
-    let film_sim = find_value(&xml, &["filmsimulation", "filmmode", "filmsimulationname"]);
+    let camera_make = pick_value(&values, &["make"]);
+    let camera_model = pick_value(&values, &["model"]);
+    let lens_make = pick_value(&values, &["lensmake"]);
+    let lens_model = pick_value(&values, &["lensmodel", "lens"]);
+    let film_sim = pick_value(
+        &values,
+        &["filmsimulation", "filmmode", "filmsimulationname"],
+    );
 
     Ok(PartialMetadata {
         date,
@@ -27,11 +46,25 @@ pub fn read_xmp_metadata(path: &Path) -> Result<PartialMetadata> {
     })
 }
 
-fn find_value(xml: &str, keys: &[&str]) -> Option<String> {
+fn pick_value(values: &HashMap<String, String>, keys: &[&str]) -> Option<String> {
+    for key in keys {
+        if let Some(value) = values.get(*key) {
+            return Some(value.clone());
+        }
+    }
+    None
+}
+
+fn collect_tag_values(xml: &str) -> HashMap<String, String> {
+    let mut values = HashMap::<String, String>::new();
     let mut cursor = 0usize;
+
     while let Some(start) = xml[cursor..].find('<') {
         let start = cursor + start;
-        let end = xml[start..].find('>')? + start;
+        let Some(raw_end) = xml[start..].find('>') else {
+            break;
+        };
+        let end = raw_end + start;
         let raw_tag = &xml[start + 1..end];
 
         if raw_tag.starts_with('/') || raw_tag.starts_with('?') || raw_tag.starts_with('!') {
@@ -41,7 +74,11 @@ fn find_value(xml: &str, keys: &[&str]) -> Option<String> {
 
         let tag_name = raw_tag.split_whitespace().next().unwrap_or_default();
         let suffix = normalize_tag_name(tag_name);
-        if !keys.iter().any(|k| k == &suffix) {
+        if !TARGET_XMP_KEYS.iter().any(|key| key == &suffix) {
+            cursor = end + 1;
+            continue;
+        }
+        if values.contains_key(&suffix) {
             cursor = end + 1;
             continue;
         }
@@ -51,14 +88,14 @@ fn find_value(xml: &str, keys: &[&str]) -> Option<String> {
             let close_pos = end + 1 + close_pos;
             let content = xml[end + 1..close_pos].trim();
             if !content.is_empty() {
-                return Some(html_unescape_basic(content));
+                values.insert(suffix, html_unescape_basic(content));
             }
         }
 
         cursor = end + 1;
     }
 
-    None
+    values
 }
 
 fn normalize(value: Option<String>) -> Option<String> {

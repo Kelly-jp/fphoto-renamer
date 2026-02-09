@@ -12,25 +12,25 @@ use std::sync::{Mutex, OnceLock};
 const EXIFTOOL_PATH_ENV: &str = "FPHOTO_EXIFTOOL_PATH";
 const FUJIFILM_MAKER_NOTE_PREFIX: &[u8] = b"FUJIFILM";
 const FUJIFILM_TAG_FILM_MODE: u16 = 0x1401;
-const EXIFTOOL_TAGS: &[&str] = &[
-    "DateTimeOriginal",
-    "DateTimeDigitized",
-    "DateTime",
-    "Make",
-    "Model",
-    "Saturation",
-    "ColorMode",
-    "LensMake",
-    "LensManufacturer",
-    "LensModel",
-    "Lens",
-    "LensType",
-    "LensInfo",
-    "LensSpecification",
-    "FilmMode",
-    "FilmSimulation",
-    "FilmSimulationName",
-    "PictureMode",
+const EXIFTOOL_ARGS: &[&str] = &[
+    "-DateTimeOriginal",
+    "-DateTimeDigitized",
+    "-DateTime",
+    "-Make",
+    "-Model",
+    "-Saturation",
+    "-ColorMode",
+    "-LensMake",
+    "-LensManufacturer",
+    "-LensModel",
+    "-Lens",
+    "-LensType",
+    "-LensInfo",
+    "-LensSpecification",
+    "-FilmMode",
+    "-FilmSimulation",
+    "-FilmSimulationName",
+    "-PictureMode",
 ];
 
 static EXIFTOOL_INSTANCE: OnceLock<Option<Mutex<ExifTool>>> = OnceLock::new();
@@ -98,14 +98,8 @@ fn read_exif_metadata_with_exiftool(path: &Path) -> Result<PartialMetadata> {
         .lock()
         .map_err(|_| anyhow!("ExifTool のロック取得に失敗しました"))?;
 
-    let args_owned = EXIFTOOL_TAGS
-        .iter()
-        .map(|tag| format!("-{tag}"))
-        .collect::<Vec<_>>();
-    let args = args_owned.iter().map(String::as_str).collect::<Vec<_>>();
-
     let json = exiftool
-        .json(path, &args)
+        .json(path, EXIFTOOL_ARGS)
         .map_err(|err| anyhow!("ExifTool 取得失敗: {err}"))?;
 
     let date = pick_json_string(

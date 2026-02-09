@@ -323,19 +323,6 @@ function appendSingleConvertLogEntry(entry) {
   el.convertLog.appendChild(li);
 }
 
-function appendConvertLogEntries(entries) {
-  if (!entries.length) {
-    return;
-  }
-  const onlyChild = el.convertLog.firstElementChild;
-  if (onlyChild && onlyChild.classList.contains("empty")) {
-    el.convertLog.innerHTML = "";
-  }
-  for (const entry of entries) {
-    appendSingleConvertLogEntry(entry);
-  }
-}
-
 async function validateTemplate() {
   try {
     await invokeCommand("validate_template_cmd", { template: el.templateInput.value });

@@ -106,11 +106,20 @@ pub fn truncate_filename_if_needed(
 }
 
 fn replace_case_insensitive(haystack: &str, needle: &str) -> String {
-    let lower_hay = haystack.to_lowercase();
-    let lower_needle = needle.to_lowercase();
-    if lower_needle.is_empty() {
+    if needle.is_empty() {
         return haystack.to_string();
     }
+
+    if haystack.is_ascii() && needle.is_ascii() {
+        return replace_case_insensitive_ascii(haystack, needle);
+    }
+
+    replace_case_insensitive_unicode(haystack, needle)
+}
+
+fn replace_case_insensitive_ascii(haystack: &str, needle: &str) -> String {
+    let lower_hay = haystack.to_ascii_lowercase();
+    let lower_needle = needle.to_ascii_lowercase();
 
     let mut result = String::with_capacity(haystack.len());
     let mut cursor = 0usize;
@@ -123,6 +132,53 @@ fn replace_case_insensitive(haystack: &str, needle: &str) -> String {
 
     result.push_str(&haystack[cursor..]);
     result
+}
+
+fn replace_case_insensitive_unicode(haystack: &str, needle: &str) -> String {
+    let folded_needle = needle
+        .chars()
+        .flat_map(char::to_lowercase)
+        .collect::<String>();
+    if folded_needle.is_empty() {
+        return haystack.to_string();
+    }
+
+    let mut result = String::with_capacity(haystack.len());
+    let mut cursor = 0usize;
+
+    while cursor < haystack.len() {
+        let remaining = &haystack[cursor..];
+        if let Some(consumed) = match_folded_prefix_len(remaining, &folded_needle) {
+            cursor += consumed;
+            continue;
+        }
+
+        let ch = remaining.chars().next().unwrap_or_default();
+        result.push(ch);
+        cursor += ch.len_utf8();
+    }
+
+    result
+}
+
+fn match_folded_prefix_len(input: &str, folded_needle: &str) -> Option<usize> {
+    let mut consumed = 0usize;
+    let mut folded_prefix = String::new();
+
+    for ch in input.chars() {
+        consumed += ch.len_utf8();
+        folded_prefix.extend(ch.to_lowercase());
+
+        if folded_prefix.len() >= folded_needle.len() {
+            return if folded_prefix == folded_needle {
+                Some(consumed)
+            } else {
+                None
+            };
+        }
+    }
+
+    None
 }
 
 fn build_exclusion_variants(term: &str) -> Vec<String> {
@@ -347,5 +403,11 @@ mod tests {
     fn normalize_spaces_to_underscore_runs_once() {
         let value = normalize_spaces_to_underscore("A  B   C");
         assert_eq!(value, "A_B_C");
+    }
+
+    #[test]
+    fn exclusions_handle_unicode_casefold_without_panicking() {
+        let value = apply_exclusions("İ_IMG_İ".to_string(), &["İ".to_string()]);
+        assert_eq!(value, "_IMG_");
     }
 }

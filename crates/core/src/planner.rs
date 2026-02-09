@@ -301,25 +301,37 @@ fn resolve_metadata(
     };
 
     if let Some(raw_root) = raw_root {
-        let xmp_path = raw_match_index
-            .and_then(|index| index.find_xmp(jpg_path))
-            .or_else(|| find_matching_xmp(jpg_root, raw_root, jpg_path, recursive));
-        let raw_path = raw_match_index
-            .and_then(|index| index.find_raw(jpg_path))
-            .or_else(|| find_matching_raw(jpg_root, raw_root, jpg_path, recursive));
-        let raw_exif = raw_path
-            .as_ref()
-            .and_then(|path| read_exif_metadata(path).ok());
+        let (xmp_path, raw_path) = if let Some(index) = raw_match_index {
+            (index.find_xmp(jpg_path), index.find_raw(jpg_path))
+        } else {
+            (
+                find_matching_xmp(jpg_root, raw_root, jpg_path, recursive),
+                find_matching_raw(jpg_root, raw_root, jpg_path, recursive),
+            )
+        };
+        let mut raw_exif_cache: Option<PartialMetadata> = None;
+        let mut raw_exif_loaded = false;
+        let mut load_raw_exif_meta = || -> Option<PartialMetadata> {
+            if !raw_exif_loaded {
+                raw_exif_cache = raw_path
+                    .as_ref()
+                    .and_then(|path| read_exif_metadata(path).ok());
+                raw_exif_loaded = true;
+            }
+            raw_exif_cache.clone()
+        };
 
         if let Some(xmp_path) = xmp_path {
             match read_xmp_metadata(&xmp_path) {
                 Ok(mut xmp_meta) => {
                     let mut source = MetadataSource::Xmp;
-                    if let Some(raw) = raw_exif.as_ref() {
-                        let before = xmp_meta.clone();
-                        xmp_meta.merge_missing_from(raw);
-                        if metadata_changed(&before, &xmp_meta) {
-                            source = MetadataSource::XmpAndRawExif;
+                    if metadata_has_missing_fields(&xmp_meta) {
+                        if let Some(raw) = load_raw_exif_meta().as_ref() {
+                            let before = xmp_meta.clone();
+                            xmp_meta.merge_missing_from(raw);
+                            if metadata_changed(&before, &xmp_meta) {
+                                source = MetadataSource::XmpAndRawExif;
+                            }
                         }
                     }
 
@@ -338,12 +350,12 @@ fn resolve_metadata(
                     ));
                 }
                 Err(_) => {
-                    if let Some(raw) = raw_exif.as_ref() {
-                        let merged = if metadata_has_missing_fields(raw) {
+                    if let Some(raw) = load_raw_exif_meta() {
+                        let merged = if metadata_has_missing_fields(&raw) {
                             load_jpg_exif_meta();
-                            merge_with_jpg_fallback(raw.clone(), jpg_exif_meta_cache.as_ref())
+                            merge_with_jpg_fallback(raw, jpg_exif_meta_cache.as_ref())
                         } else {
-                            raw.clone()
+                            raw
                         };
                         return Ok(to_photo_metadata(
                             merged,
@@ -357,7 +369,7 @@ fn resolve_metadata(
             }
         }
 
-        if let Some(raw) = raw_exif {
+        if let Some(raw) = load_raw_exif_meta() {
             let merged = if metadata_has_missing_fields(&raw) {
                 load_jpg_exif_meta();
                 merge_with_jpg_fallback(raw, jpg_exif_meta_cache.as_ref())
