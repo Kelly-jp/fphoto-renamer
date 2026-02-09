@@ -1,0 +1,16 @@
+{
+  "name": "fphoto-renamer-gui-e2e",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Playwright browser UI tests for fphoto-renamer GUI",
+  "type": "module",
+  "scripts": {
+    "test:ui": "playwright test -c playwright.config.mjs",
+    "test:ui:headed": "playwright test -c playwright.config.mjs --headed",
+    "test:ui:debug": "PWDEBUG=1 playwright test -c playwright.config.mjs --headed --workers=1",
+    "test:ui:install-browser": "playwright install chromium"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.52.0"
+  }
+}

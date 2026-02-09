@@ -135,6 +135,28 @@ JPG/RAW フォルダは「選択」「ドラッグ＆ドロップ」「クリア
 削除文字列はチップとして管理し、`×` ボタンで削除できます。
 GUI は Tauri + HTML/CSS/JavaScript で実装しています。
 
+## GUI ブラウザUIテスト (Playwright)
+
+前提:
+
+- Node.js / npm が利用可能
+- Playwright の Chromium をインストール済み（`npm run test:ui:install-browser`）
+
+実行:
+
+```bash
+cd crates/gui
+npm install
+npm run test:ui
+```
+
+補足:
+
+- `crates/gui/dist` をローカルHTTP配信してテストします（Tauri本体は起動しません）。
+- `window.__TAURI__` API はテスト内でモックしており、画面ロジックをブラウザ単体で検証します。
+- HTTPポートを変更する場合は `PLAYWRIGHT_WEB_PORT=4455 npm run test:ui` を利用します。
+- 主要な検証対象: 初期描画、変換成功（複数候補含む）、削除文字列の重複除外、テンプレート検証エラー、適用失敗、undo成功/失敗、フォルダ選択（成功/キャンセル/失敗）、JPGクリア、設定保存デバウンス、設定保存失敗、ドロップ反映、禁止文字サニタイズ、適用payload、テンプレートリセット、サンプル生成失敗。
+
 ## ExifTool の指定
 
 - 環境変数 `FPHOTO_EXIFTOOL_PATH` を設定すると、その実行ファイルを優先使用します。
