@@ -1,5 +1,5 @@
 use crate::exif_reader::read_exif_metadata;
-use crate::matcher::{find_matching_raw, find_matching_xmp};
+use crate::matcher::{build_raw_match_index, find_matching_raw, find_matching_xmp, RawMatchIndex};
 use crate::metadata::{MetadataSource, PartialMetadata, PhotoMetadata};
 use crate::sanitize::{
     apply_exclusions, cleanup_filename, normalize_spaces_to_underscore, sanitize_filename,
@@ -90,6 +90,9 @@ pub fn generate_plan(options: &PlanOptions) -> Result<RenamePlan> {
 
     let parts = parse_template(&options.template)?;
     let effective_raw_input = resolve_effective_raw_input(options);
+    let raw_match_index = effective_raw_input
+        .as_deref()
+        .map(|raw_root| build_raw_match_index(&options.jpg_input, raw_root, options.recursive));
     let mut stats = RenameStats::default();
     let jpg_files = collect_jpg_files(
         &options.jpg_input,
@@ -104,6 +107,7 @@ pub fn generate_plan(options: &PlanOptions) -> Result<RenamePlan> {
             prepare_candidate(
                 &options.jpg_input,
                 effective_raw_input.as_deref(),
+                raw_match_index.as_ref(),
                 options.recursive,
                 &parts,
                 options.dedupe_same_maker,
@@ -158,6 +162,7 @@ pub fn generate_plan(options: &PlanOptions) -> Result<RenamePlan> {
 fn prepare_candidate(
     jpg_root: &Path,
     raw_root: Option<&Path>,
+    raw_match_index: Option<&RawMatchIndex>,
     recursive: bool,
     parts: &[TemplatePart],
     dedupe_same_maker: bool,
@@ -165,7 +170,7 @@ fn prepare_candidate(
     max_filename_len: usize,
     jpg_path: &Path,
 ) -> Result<PreparedCandidate> {
-    let metadata = resolve_metadata(jpg_root, raw_root, jpg_path, recursive)?;
+    let metadata = resolve_metadata(jpg_root, raw_root, raw_match_index, jpg_path, recursive)?;
     let rendered = render_template_with_options(parts, &metadata, dedupe_same_maker);
     let excluded = apply_exclusions(rendered, exclusions);
     let normalized_spaces = normalize_spaces_to_underscore(&excluded);
@@ -276,6 +281,7 @@ fn collect_jpg_files(
 fn resolve_metadata(
     jpg_root: &Path,
     raw_root: Option<&Path>,
+    raw_match_index: Option<&RawMatchIndex>,
     jpg_path: &Path,
     recursive: bool,
 ) -> Result<PhotoMetadata> {
@@ -295,8 +301,12 @@ fn resolve_metadata(
     };
 
     if let Some(raw_root) = raw_root {
-        let xmp_path = find_matching_xmp(jpg_root, raw_root, jpg_path, recursive);
-        let raw_path = find_matching_raw(jpg_root, raw_root, jpg_path, recursive);
+        let xmp_path = raw_match_index
+            .and_then(|index| index.find_xmp(jpg_path))
+            .or_else(|| find_matching_xmp(jpg_root, raw_root, jpg_path, recursive));
+        let raw_path = raw_match_index
+            .and_then(|index| index.find_raw(jpg_path))
+            .or_else(|| find_matching_raw(jpg_root, raw_root, jpg_path, recursive));
         let raw_exif = raw_path
             .as_ref()
             .and_then(|path| read_exif_metadata(path).ok());

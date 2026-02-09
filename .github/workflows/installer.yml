@@ -17,10 +17,12 @@ jobs:
             bundle: dmg
             ext: dmg
             artifact_name: installer-macos-dmg
+            resource_glob: resources/bin/macos/*
           - os: windows-latest
             bundle: msi
             ext: msi
             artifact_name: installer-windows-msi
+            resource_glob: resources/bin/windows/*
 
     steps:
       - name: Checkout
@@ -48,9 +50,13 @@ jobs:
         shell: bash
         run: |
           cd crates/gui/src-tauri
+          CONFIG_JSON=$(cat <<EOF
+          {"bundle":{"active":true,"resources":["${{ matrix.resource_glob }}","resources/LICENSES/*"]}}
+          EOF
+          )
           cargo tauri build \
             --bundles "${{ matrix.bundle }}" \
-            --config '{"bundle":{"active":true}}'
+            --config "${CONFIG_JSON}"
 
       - name: Collect installer artifacts
         shell: bash

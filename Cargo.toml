@@ -20,3 +20,10 @@ exiftool = "0.3"
 clap = { version = "4", features = ["derive"] }
 toml = "0.8"
 rayon = "1"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"

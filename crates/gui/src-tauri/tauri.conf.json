@@ -35,7 +35,6 @@
     "resources": [
       "resources/bin/macos/*",
       "resources/bin/windows/*",
-      "resources/bin/linux/*",
       "resources/LICENSES/*"
     ]
   }

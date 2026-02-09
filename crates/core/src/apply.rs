@@ -1,8 +1,9 @@
 use crate::config::app_paths;
 use crate::planner::{RenameCandidate, RenamePlan};
 use anyhow::{Context, Result};
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -107,34 +108,58 @@ fn backup_original_files(plan: &RenamePlan, candidates: &[&RenameCandidate]) -> 
         )
     })?;
 
+    let mut reserved_paths = HashSet::<PathBuf>::new();
+    let mut backup_jobs = Vec::<(PathBuf, PathBuf)>::with_capacity(candidates.len());
     for candidate in candidates {
-        let backup_path =
-            resolve_backup_path(&backup_root, &plan.jpg_root, &candidate.original_path);
-        if let Some(parent) = backup_path.parent() {
-            fs::create_dir_all(parent).with_context(|| {
+        let backup_path = resolve_backup_path_with_reserved(
+            &backup_root,
+            &plan.jpg_root,
+            &candidate.original_path,
+            &mut reserved_paths,
+        );
+        backup_jobs.push((candidate.original_path.clone(), backup_path));
+    }
+
+    backup_jobs
+        .par_iter()
+        .try_for_each(|(original_path, backup_path)| -> Result<()> {
+            if let Some(parent) = backup_path.parent() {
+                fs::create_dir_all(parent).with_context(|| {
+                    format!(
+                        "バックアップ用フォルダを作成できませんでした: {}",
+                        parent.display()
+                    )
+                })?;
+            }
+            fs::copy(original_path, backup_path).with_context(|| {
                 format!(
-                    "バックアップ用フォルダを作成できませんでした: {}",
-                    parent.display()
+                    "バックアップに失敗しました: {} -> {}",
+                    original_path.display(),
+                    backup_path.display()
                 )
             })?;
-        }
-        fs::copy(&candidate.original_path, &backup_path).with_context(|| {
-            format!(
-                "バックアップに失敗しました: {} -> {}",
-                candidate.original_path.display(),
-                backup_path.display()
-            )
+            Ok(())
         })?;
-    }
 
     Ok(())
 }
 
+#[cfg(test)]
 fn resolve_backup_path(backup_root: &Path, jpg_root: &Path, original_path: &Path) -> PathBuf {
+    let mut reserved_paths = HashSet::<PathBuf>::new();
+    resolve_backup_path_with_reserved(backup_root, jpg_root, original_path, &mut reserved_paths)
+}
+
+fn resolve_backup_path_with_reserved(
+    backup_root: &Path,
+    jpg_root: &Path,
+    original_path: &Path,
+    reserved_paths: &mut HashSet<PathBuf>,
+) -> PathBuf {
     if let Ok(relative) = original_path.strip_prefix(jpg_root) {
         if !relative.as_os_str().is_empty() {
             let candidate = backup_root.join(relative);
-            return unique_backup_path(candidate);
+            return unique_backup_path_with_reserved(candidate, reserved_paths);
         }
     }
 
@@ -142,11 +167,21 @@ fn resolve_backup_path(backup_root: &Path, jpg_root: &Path, original_path: &Path
         .file_name()
         .map(|v| v.to_os_string())
         .unwrap_or_else(|| OsString::from("file"));
-    unique_backup_path(backup_root.join(file_name))
+    unique_backup_path_with_reserved(backup_root.join(file_name), reserved_paths)
 }
 
+#[cfg(test)]
 fn unique_backup_path(candidate: PathBuf) -> PathBuf {
-    if !candidate.exists() {
+    let mut reserved_paths = HashSet::<PathBuf>::new();
+    unique_backup_path_with_reserved(candidate, &mut reserved_paths)
+}
+
+fn unique_backup_path_with_reserved(
+    candidate: PathBuf,
+    reserved_paths: &mut HashSet<PathBuf>,
+) -> PathBuf {
+    if !candidate.exists() && !reserved_paths.contains(&candidate) {
+        reserved_paths.insert(candidate.clone());
         return candidate;
     }
 
@@ -168,7 +203,8 @@ fn unique_backup_path(candidate: PathBuf) -> PathBuf {
             name.push_str(&ext);
         }
         let next = parent.join(name);
-        if !next.exists() {
+        if !next.exists() && !reserved_paths.contains(&next) {
+            reserved_paths.insert(next.clone());
             return next;
         }
         n += 1;
@@ -294,12 +330,13 @@ fn temp_path_for(original_path: &Path, index: usize) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_plan_with_options, cleanup_backup_if_needed, resolve_backup_path, unique_backup_path,
-        ApplyOptions, UndoLog,
+        apply_plan_with_options, cleanup_backup_if_needed, resolve_backup_path,
+        resolve_backup_path_with_reserved, unique_backup_path, ApplyOptions, UndoLog,
     };
     use crate::metadata::{MetadataSource, PhotoMetadata};
     use crate::planner::{RenameCandidate, RenamePlan, RenameStats};
     use chrono::Local;
+    use std::collections::HashSet;
     use std::fs;
     use std::path::PathBuf;
     use tempfile::tempdir;
@@ -414,5 +451,25 @@ mod tests {
         };
         cleanup_backup_if_needed(&log).expect("cleanup should succeed");
         assert!(backup_root.exists());
+    }
+
+    #[test]
+    fn resolve_backup_path_with_reserved_avoids_in_batch_collisions() {
+        let temp = tempdir().expect("tempdir");
+        let jpg_root = temp.path().join("jpg");
+        let backup_root = jpg_root.join("backup");
+        fs::create_dir_all(&backup_root).expect("create backup root");
+
+        let original_a = temp.path().join("a").join("IMG_0001.JPG");
+        let original_b = temp.path().join("b").join("IMG_0001.JPG");
+
+        let mut reserved = HashSet::<PathBuf>::new();
+        let backup_a =
+            resolve_backup_path_with_reserved(&backup_root, &jpg_root, &original_a, &mut reserved);
+        let backup_b =
+            resolve_backup_path_with_reserved(&backup_root, &jpg_root, &original_b, &mut reserved);
+
+        assert_eq!(backup_a, backup_root.join("IMG_0001.JPG"));
+        assert_eq!(backup_b, backup_root.join("IMG_0001_001.JPG"));
     }
 }
