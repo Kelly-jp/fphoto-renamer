@@ -46,6 +46,11 @@ jobs:
             cargo install tauri-cli --locked --version "^2.0"
           fi
 
+      - name: Verify ExifTool license bundle
+        shell: bash
+        run: |
+          bash scripts/verify_exiftool_license.sh "${{ matrix.os }}"
+
       - name: Build installer
         shell: bash
         run: |

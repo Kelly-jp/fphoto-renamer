@@ -14,6 +14,7 @@ macOS/Windows 向けの JPG リネームツールです。CLI と Tauri GUI は�
 - EXIF 取得は `exiftool`（`-stay_open`）優先
   - 同梱しない場合: `exiftool` を PATH にインストール
   - 同梱する場合: `crates/gui/src-tauri/resources/bin/<os>/` に配置
+  - 同梱する場合: `crates/gui/src-tauri/resources/LICENSES/EXIFTOOL_LICENSE.txt` も必ず同梱
 
 ### Debug ビルド
 
@@ -186,3 +187,8 @@ npm run test:ui
 - 環境変数 `FPHOTO_EXIFTOOL_PATH` を設定すると、その実行ファイルを優先使用します。
 - GUI では同梱リソースを自動探索し、見つかった場合に `FPHOTO_EXIFTOOL_PATH` を自動設定します。
 - 同梱も PATH も見つからない場合は、`kamadak-exif` にフォールバックします。
+
+## ExifTool 同梱時のライセンス対応
+
+- ExifTool 同梱時は `crates/gui/src-tauri/resources/LICENSES/EXIFTOOL_LICENSE.txt` を更新・同梱してください。
+- CI では `scripts/verify_exiftool_license.sh` により、同梱バイナリがある場合にライセンス文書の存在を検証します。

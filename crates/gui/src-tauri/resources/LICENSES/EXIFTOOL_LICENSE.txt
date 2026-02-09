@@ -1,0 +1,18 @@
+ExifTool License Notice
+=======================
+
+This application may bundle ExifTool binaries.
+
+ExifTool is free software and is distributed under the same terms as Perl itself.
+In practice, Perl is licensed under either of the following:
+
+- GNU General Public License (GPL), version 1 or any later version
+- Artistic License (the Perl Artistic License)
+
+Official references:
+
+- ExifTool project page: https://exiftool.org/
+- Perl licensing information: https://dev.perl.org/licenses/
+
+When updating the bundled ExifTool binary, verify that the above license terms
+still match the bundled version and update this notice if needed.
