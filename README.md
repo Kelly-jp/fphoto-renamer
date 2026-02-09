@@ -135,6 +135,30 @@ JPG/RAW フォルダは「選択」「ドラッグ＆ドロップ」「クリア
 削除文字列はチップとして管理し、`×` ボタンで削除できます。
 GUI は Tauri + HTML/CSS/JavaScript で実装しています。
 
+## テスト実行コマンド
+
+リポジトリルートで実行:
+
+```bash
+# core のユニットテスト
+cargo test -p fphoto_renamer_core
+
+# CLI のユニットテスト
+cargo test -p fphoto-renamer-cli
+
+# Rust テストをまとめて実行
+cargo test --workspace
+```
+
+GUI ブラウザUIテスト:
+
+```bash
+cd crates/gui
+npm install
+npm run test:ui:install-browser
+npm run test:ui
+```
+
 ## GUI ブラウザUIテスト (Playwright)
 
 前提:

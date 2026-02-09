@@ -152,3 +152,88 @@ fn print_table(plan: &fphoto_renamer_core::RenamePlan) {
         plan.stats.unchanged
     );
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{Cli, Commands, OutputFormat};
+    use clap::Parser;
+    use fphoto_renamer_core::DEFAULT_TEMPLATE;
+
+    #[test]
+    fn parse_rename_defaults() {
+        let cli = Cli::try_parse_from(["fphoto-renamer-cli", "rename", "--jpg-input", "/tmp/jpg"])
+            .expect("parse should succeed");
+
+        match cli.command {
+            Commands::Rename(args) => {
+                assert_eq!(args.jpg_input, "/tmp/jpg");
+                assert_eq!(args.raw_input, None);
+                assert!(!args.raw_parent_if_missing);
+                assert!(!args.apply);
+                assert_eq!(args.template, DEFAULT_TEMPLATE);
+                assert!(args.exclude.is_empty());
+                assert!(args.dedupe_same_maker);
+                assert!(!args.backup_originals);
+                assert!(matches!(args.output, OutputFormat::Table));
+            }
+            _ => panic!("rename command expected"),
+        }
+    }
+
+    #[test]
+    fn parse_rename_with_explicit_values() {
+        let cli = Cli::try_parse_from([
+            "fphoto-renamer-cli",
+            "rename",
+            "--jpg-input",
+            "/tmp/jpg",
+            "--raw-input",
+            "/tmp/raw",
+            "--raw-parent-if-missing",
+            "--apply",
+            "--template",
+            "{orig_name}",
+            "--exclude",
+            "-NR",
+            "--exclude",
+            "-DxO",
+            "--dedupe-same-maker=false",
+            "--backup-originals",
+            "--output",
+            "json",
+        ])
+        .expect("parse should succeed");
+
+        match cli.command {
+            Commands::Rename(args) => {
+                assert_eq!(args.raw_input.as_deref(), Some("/tmp/raw"));
+                assert!(args.raw_parent_if_missing);
+                assert!(args.apply);
+                assert_eq!(args.template, "{orig_name}");
+                assert_eq!(args.exclude, vec!["-NR".to_string(), "-DxO".to_string()]);
+                assert!(!args.dedupe_same_maker);
+                assert!(args.backup_originals);
+                assert!(matches!(args.output, OutputFormat::Json));
+            }
+            _ => panic!("rename command expected"),
+        }
+    }
+
+    #[test]
+    fn parse_invalid_output_value_fails() {
+        let err = Cli::try_parse_from([
+            "fphoto-renamer-cli",
+            "rename",
+            "--jpg-input",
+            "/tmp/jpg",
+            "--output",
+            "yaml",
+        ])
+        .expect_err("invalid output should fail");
+        let rendered = err.to_string();
+        assert!(
+            rendered.contains("invalid value"),
+            "unexpected parse error: {rendered}"
+        );
+    }
+}

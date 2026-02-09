@@ -86,3 +86,42 @@ pub fn save_config(config: &AppConfig) -> Result<()> {
     })?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::AppConfig;
+    use crate::DEFAULT_TEMPLATE;
+
+    #[test]
+    fn default_config_has_expected_values() {
+        let cfg = AppConfig::default();
+        assert_eq!(cfg.date_format, "YYYYMMDDHHMMSS");
+        assert!(!cfg.recursive_default);
+        assert!(!cfg.include_hidden_default);
+        assert_eq!(cfg.language, "ja");
+        assert_eq!(cfg.template, DEFAULT_TEMPLATE);
+        assert!(cfg.exclude_strings.is_empty());
+        assert!(!cfg.backup_originals);
+        assert!(!cfg.raw_parent_if_missing);
+    }
+
+    #[test]
+    fn deserialize_legacy_config_defaults_new_flags_to_false() {
+        let raw = r#"
+date_format = "YYYYMMDDHHMMSS"
+recursive_default = true
+include_hidden_default = false
+language = "ja"
+template = "{orig_name}"
+exclude_strings = ["-NR"]
+"#;
+        let cfg: AppConfig = toml::from_str(raw).expect("legacy config should deserialize");
+        assert_eq!(cfg.date_format, "YYYYMMDDHHMMSS");
+        assert!(cfg.recursive_default);
+        assert!(!cfg.include_hidden_default);
+        assert_eq!(cfg.template, "{orig_name}");
+        assert_eq!(cfg.exclude_strings, vec!["-NR"]);
+        assert!(!cfg.backup_originals);
+        assert!(!cfg.raw_parent_if_missing);
+    }
+}

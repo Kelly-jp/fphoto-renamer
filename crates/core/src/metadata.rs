@@ -72,3 +72,61 @@ impl PartialMetadata {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{PartialMetadata, PhotoMetadata};
+    use crate::metadata::MetadataSource;
+    use chrono::Local;
+    use std::path::PathBuf;
+
+    #[test]
+    fn normalized_make_trims_and_drops_empty() {
+        let mut meta = PhotoMetadata {
+            source: MetadataSource::JpgExif,
+            date: Local::now(),
+            camera_make: Some("  FUJIFILM  ".to_string()),
+            camera_model: None,
+            lens_make: Some("   ".to_string()),
+            lens_model: None,
+            film_sim: None,
+            original_name: "IMG_0001".to_string(),
+            jpg_path: PathBuf::from("/tmp/IMG_0001.JPG"),
+        };
+
+        assert_eq!(meta.normalized_camera_make(), Some("FUJIFILM"));
+        assert_eq!(meta.normalized_lens_make(), None);
+
+        meta.camera_make = Some(" ".to_string());
+        assert_eq!(meta.normalized_camera_make(), None);
+    }
+
+    #[test]
+    fn merge_missing_from_only_fills_missing_fields() {
+        let now = Local::now();
+        let mut base = PartialMetadata {
+            date: Some(now),
+            camera_make: Some("SONY".to_string()),
+            camera_model: None,
+            lens_make: None,
+            lens_model: Some("35mm F2".to_string()),
+            film_sim: None,
+        };
+        let fallback = PartialMetadata {
+            date: None,
+            camera_make: Some("FUJIFILM".to_string()),
+            camera_model: Some("X-T5".to_string()),
+            lens_make: Some("FUJIFILM".to_string()),
+            lens_model: Some("XF16-55".to_string()),
+            film_sim: Some("CLASSIC CHROME".to_string()),
+        };
+
+        base.merge_missing_from(&fallback);
+        assert_eq!(base.date, Some(now));
+        assert_eq!(base.camera_make.as_deref(), Some("SONY"));
+        assert_eq!(base.camera_model.as_deref(), Some("X-T5"));
+        assert_eq!(base.lens_make.as_deref(), Some("FUJIFILM"));
+        assert_eq!(base.lens_model.as_deref(), Some("35mm F2"));
+        assert_eq!(base.film_sim.as_deref(), Some("CLASSIC CHROME"));
+    }
+}

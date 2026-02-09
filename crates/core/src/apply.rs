@@ -290,3 +290,129 @@ fn temp_path_for(original_path: &Path, index: usize) -> PathBuf {
         .unwrap_or_else(|| "file".to_string());
     parent.join(format!(".fphoto_tmp_{}_{}_{}", now, index, file_name))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        apply_plan_with_options, cleanup_backup_if_needed, resolve_backup_path, unique_backup_path,
+        ApplyOptions, UndoLog,
+    };
+    use crate::metadata::{MetadataSource, PhotoMetadata};
+    use crate::planner::{RenameCandidate, RenamePlan, RenameStats};
+    use chrono::Local;
+    use std::fs;
+    use std::path::PathBuf;
+    use tempfile::tempdir;
+
+    fn sample_metadata(jpg_path: PathBuf) -> PhotoMetadata {
+        PhotoMetadata {
+            source: MetadataSource::JpgExif,
+            date: Local::now(),
+            camera_make: Some("FUJIFILM".to_string()),
+            camera_model: Some("X-T5".to_string()),
+            lens_make: Some("FUJIFILM".to_string()),
+            lens_model: Some("XF16-55".to_string()),
+            film_sim: Some("CLASSIC CHROME".to_string()),
+            original_name: "IMG_0001".to_string(),
+            jpg_path,
+        }
+    }
+
+    #[test]
+    fn apply_plan_returns_unchanged_when_no_candidates_changed() {
+        let temp = tempdir().expect("tempdir");
+        let jpg_root = temp.path().join("jpg");
+        fs::create_dir_all(&jpg_root).expect("create jpg root");
+
+        let original = jpg_root.join("IMG_0001.JPG");
+        let target = jpg_root.join("IMG_0001.JPG");
+        let plan = RenamePlan {
+            jpg_root: jpg_root.clone(),
+            template: "{orig_name}".to_string(),
+            exclusions: Vec::new(),
+            candidates: vec![RenameCandidate {
+                original_path: original.clone(),
+                target_path: target,
+                metadata_source: MetadataSource::JpgExif,
+                metadata: sample_metadata(original),
+                rendered_base: "IMG_0001".to_string(),
+                changed: false,
+            }],
+            stats: RenameStats::default(),
+        };
+
+        let result = apply_plan_with_options(&plan, &ApplyOptions::default())
+            .expect("unchanged plan should be accepted");
+        assert_eq!(result.applied, 0);
+        assert_eq!(result.unchanged, 1);
+    }
+
+    #[test]
+    fn unique_backup_path_adds_incremental_suffix() {
+        let temp = tempdir().expect("tempdir");
+        let candidate = temp.path().join("IMG_0001.JPG");
+        fs::write(&candidate, b"x").expect("create first");
+        fs::write(temp.path().join("IMG_0001_001.JPG"), b"x").expect("create second");
+
+        let resolved = unique_backup_path(candidate);
+        assert_eq!(
+            resolved.file_name().and_then(|v| v.to_str()),
+            Some("IMG_0001_002.JPG")
+        );
+    }
+
+    #[test]
+    fn resolve_backup_path_keeps_relative_tree_under_backup_root() {
+        let temp = tempdir().expect("tempdir");
+        let jpg_root = temp.path().join("jpg");
+        let backup_root = jpg_root.join("backup");
+        let original = jpg_root.join("nested").join("IMG_0001.JPG");
+
+        let backup_path = resolve_backup_path(&backup_root, &jpg_root, &original);
+        assert_eq!(backup_path, backup_root.join("nested").join("IMG_0001.JPG"));
+    }
+
+    #[test]
+    fn resolve_backup_path_falls_back_to_filename_for_outside_root() {
+        let temp = tempdir().expect("tempdir");
+        let jpg_root = temp.path().join("jpg");
+        let backup_root = jpg_root.join("backup");
+        let original = temp.path().join("other").join("IMG_9999.JPG");
+
+        let backup_path = resolve_backup_path(&backup_root, &jpg_root, &original);
+        assert_eq!(backup_path, backup_root.join("IMG_9999.JPG"));
+    }
+
+    #[test]
+    fn cleanup_backup_if_needed_removes_backup_directory() {
+        let temp = tempdir().expect("tempdir");
+        let jpg_root = temp.path().join("jpg");
+        let backup_root = jpg_root.join("backup");
+        fs::create_dir_all(&backup_root).expect("create backup root");
+        fs::write(backup_root.join("file.txt"), b"x").expect("create backup file");
+
+        let log = UndoLog {
+            operations: Vec::new(),
+            backup_originals: true,
+            jpg_root: Some(jpg_root.clone()),
+        };
+        cleanup_backup_if_needed(&log).expect("cleanup should succeed");
+        assert!(!backup_root.exists());
+    }
+
+    #[test]
+    fn cleanup_backup_if_needed_keeps_backup_when_disabled() {
+        let temp = tempdir().expect("tempdir");
+        let jpg_root = temp.path().join("jpg");
+        let backup_root = jpg_root.join("backup");
+        fs::create_dir_all(&backup_root).expect("create backup root");
+
+        let log = UndoLog {
+            operations: Vec::new(),
+            backup_originals: false,
+            jpg_root: Some(jpg_root),
+        };
+        cleanup_backup_if_needed(&log).expect("cleanup should succeed");
+        assert!(backup_root.exists());
+    }
+}
