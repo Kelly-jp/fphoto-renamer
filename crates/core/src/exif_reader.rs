@@ -36,23 +36,34 @@ const EXIFTOOL_TAGS: &[&str] = &[
 static EXIFTOOL_INSTANCE: OnceLock<Option<Mutex<ExifTool>>> = OnceLock::new();
 
 pub fn read_exif_metadata(path: &Path) -> Result<PartialMetadata> {
-    let exiftool_result = read_exif_metadata_with_exiftool(path);
-    let kamadak_result = read_exif_metadata_with_kamadak(path);
-
-    match (exiftool_result, kamadak_result) {
-        (Ok(mut exiftool_meta), Ok(kamadak_meta)) => {
-            exiftool_meta.merge_missing_from(&kamadak_meta);
+    match read_exif_metadata_with_exiftool(path) {
+        Ok(mut exiftool_meta) => {
+            if metadata_has_missing_fields(&exiftool_meta) {
+                if let Ok(kamadak_meta) = read_exif_metadata_with_kamadak(path) {
+                    exiftool_meta.merge_missing_from(&kamadak_meta);
+                }
+            }
             Ok(exiftool_meta)
         }
-        (Ok(exiftool_meta), Err(_)) => Ok(exiftool_meta),
-        (Err(_), Ok(kamadak_meta)) => Ok(kamadak_meta),
-        (Err(exiftool_err), Err(kamadak_err)) => Err(anyhow!(
-            "EXIFを解析できませんでした: {} (exiftool: {}; kamadak-exif: {})",
-            path.display(),
-            exiftool_err,
-            kamadak_err
-        )),
+        Err(exiftool_err) => match read_exif_metadata_with_kamadak(path) {
+            Ok(kamadak_meta) => Ok(kamadak_meta),
+            Err(kamadak_err) => Err(anyhow!(
+                "EXIFを解析できませんでした: {} (exiftool: {}; kamadak-exif: {})",
+                path.display(),
+                exiftool_err,
+                kamadak_err
+            )),
+        },
     }
+}
+
+fn metadata_has_missing_fields(meta: &PartialMetadata) -> bool {
+    meta.date.is_none()
+        || meta.camera_make.is_none()
+        || meta.camera_model.is_none()
+        || meta.lens_make.is_none()
+        || meta.lens_model.is_none()
+        || meta.film_sim.is_none()
 }
 
 fn exiftool_instance() -> Option<&'static Mutex<ExifTool>> {

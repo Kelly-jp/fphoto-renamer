@@ -5,11 +5,12 @@ use crate::sanitize::{
     apply_exclusions, cleanup_filename, normalize_spaces_to_underscore, sanitize_filename,
     truncate_filename_if_needed,
 };
-use crate::template::{parse_template, render_template_with_options};
+use crate::template::{parse_template, render_template_with_options, TemplatePart};
 use crate::xmp_reader::read_xmp_metadata;
 use crate::DEFAULT_TEMPLATE;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Local};
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fs;
@@ -74,6 +75,14 @@ pub struct RenamePlan {
     pub stats: RenameStats,
 }
 
+#[derive(Debug)]
+struct PreparedCandidate {
+    original_path: PathBuf,
+    metadata: PhotoMetadata,
+    rendered_base: String,
+    extension: String,
+}
+
 pub fn generate_plan(options: &PlanOptions) -> Result<RenamePlan> {
     if !options.jpg_input.exists() {
         anyhow::bail!("JPGフォルダが存在しません: {}", options.jpg_input.display());
@@ -89,50 +98,50 @@ pub fn generate_plan(options: &PlanOptions) -> Result<RenamePlan> {
         &mut stats,
     )?;
 
-    let mut candidates = Vec::with_capacity(jpg_files.len());
+    let prepared_results: Vec<Result<PreparedCandidate>> = jpg_files
+        .par_iter()
+        .map(|jpg_path| {
+            prepare_candidate(
+                &options.jpg_input,
+                effective_raw_input.as_deref(),
+                options.recursive,
+                &parts,
+                options.dedupe_same_maker,
+                &options.exclusions,
+                options.max_filename_len,
+                jpg_path,
+            )
+        })
+        .collect();
+
+    let mut prepared = Vec::with_capacity(prepared_results.len());
+    for result in prepared_results {
+        prepared.push(result?);
+    }
+
+    let mut candidates = Vec::with_capacity(prepared.len());
     let mut planned_paths = HashSet::<PathBuf>::new();
-
-    for jpg_path in jpg_files {
-        let metadata = resolve_metadata(
-            &options.jpg_input,
-            effective_raw_input.as_deref(),
-            &jpg_path,
-            options.recursive,
-        )?;
-
-        let rendered = render_template_with_options(&parts, &metadata, options.dedupe_same_maker);
-        let excluded = apply_exclusions(rendered, &options.exclusions);
-        let normalized_spaces = normalize_spaces_to_underscore(&excluded);
-        let cleaned = cleanup_filename(&normalized_spaces);
-        let sanitized = sanitize_filename(&cleaned);
-
-        let extension = jpg_path
-            .extension()
-            .map(|v| format!(".{}", v.to_string_lossy()))
-            .unwrap_or_default();
-
-        let truncated =
-            truncate_filename_if_needed(&sanitized, &extension, options.max_filename_len);
+    for prepared in prepared {
         let target = resolve_collision(
-            &jpg_path,
-            &truncated,
-            &extension,
+            &prepared.original_path,
+            &prepared.rendered_base,
+            &prepared.extension,
             &mut planned_paths,
             options.max_filename_len,
         )?;
 
-        let changed = target != jpg_path;
+        let changed = target != prepared.original_path;
         if !changed {
             stats.unchanged += 1;
         }
 
         stats.planned += 1;
         candidates.push(RenameCandidate {
-            original_path: jpg_path,
+            original_path: prepared.original_path,
             target_path: target,
-            metadata_source: metadata.source,
-            metadata,
-            rendered_base: truncated,
+            metadata_source: prepared.metadata.source,
+            metadata: prepared.metadata,
+            rendered_base: prepared.rendered_base,
             changed,
         });
     }
@@ -143,6 +152,37 @@ pub fn generate_plan(options: &PlanOptions) -> Result<RenamePlan> {
         exclusions: options.exclusions.clone(),
         candidates,
         stats,
+    })
+}
+
+fn prepare_candidate(
+    jpg_root: &Path,
+    raw_root: Option<&Path>,
+    recursive: bool,
+    parts: &[TemplatePart],
+    dedupe_same_maker: bool,
+    exclusions: &[String],
+    max_filename_len: usize,
+    jpg_path: &Path,
+) -> Result<PreparedCandidate> {
+    let metadata = resolve_metadata(jpg_root, raw_root, jpg_path, recursive)?;
+    let rendered = render_template_with_options(parts, &metadata, dedupe_same_maker);
+    let excluded = apply_exclusions(rendered, exclusions);
+    let normalized_spaces = normalize_spaces_to_underscore(&excluded);
+    let cleaned = cleanup_filename(&normalized_spaces);
+    let sanitized = sanitize_filename(&cleaned);
+
+    let extension = jpg_path
+        .extension()
+        .map(|v| format!(".{}", v.to_string_lossy()))
+        .unwrap_or_default();
+    let rendered_base = truncate_filename_if_needed(&sanitized, &extension, max_filename_len);
+
+    Ok(PreparedCandidate {
+        original_path: jpg_path.to_path_buf(),
+        metadata,
+        rendered_base,
+        extension,
     })
 }
 
@@ -244,7 +284,15 @@ fn resolve_metadata(
         .file_stem()
         .map(|v| v.to_string_lossy().to_string())
         .unwrap_or_else(|| "untitled".to_string());
-    let jpg_exif_meta = read_exif_metadata(jpg_path).ok();
+    let mut jpg_exif_meta_cache: Option<PartialMetadata> = None;
+    let mut jpg_exif_loaded = false;
+
+    let mut load_jpg_exif_meta = || {
+        if !jpg_exif_loaded {
+            jpg_exif_meta_cache = read_exif_metadata(jpg_path).ok();
+            jpg_exif_loaded = true;
+        }
+    };
 
     if let Some(raw_root) = raw_root {
         let xmp_path = find_matching_xmp(jpg_root, raw_root, jpg_path, recursive);
@@ -265,7 +313,12 @@ fn resolve_metadata(
                         }
                     }
 
-                    let merged = merge_with_jpg_fallback(xmp_meta, jpg_exif_meta.as_ref());
+                    let merged = if metadata_has_missing_fields(&xmp_meta) {
+                        load_jpg_exif_meta();
+                        merge_with_jpg_fallback(xmp_meta, jpg_exif_meta_cache.as_ref())
+                    } else {
+                        xmp_meta
+                    };
                     return Ok(to_photo_metadata(
                         merged,
                         source,
@@ -276,7 +329,12 @@ fn resolve_metadata(
                 }
                 Err(_) => {
                     if let Some(raw) = raw_exif.as_ref() {
-                        let merged = merge_with_jpg_fallback(raw.clone(), jpg_exif_meta.as_ref());
+                        let merged = if metadata_has_missing_fields(raw) {
+                            load_jpg_exif_meta();
+                            merge_with_jpg_fallback(raw.clone(), jpg_exif_meta_cache.as_ref())
+                        } else {
+                            raw.clone()
+                        };
                         return Ok(to_photo_metadata(
                             merged,
                             MetadataSource::RawExif,
@@ -290,7 +348,12 @@ fn resolve_metadata(
         }
 
         if let Some(raw) = raw_exif {
-            let merged = merge_with_jpg_fallback(raw, jpg_exif_meta.as_ref());
+            let merged = if metadata_has_missing_fields(&raw) {
+                load_jpg_exif_meta();
+                merge_with_jpg_fallback(raw, jpg_exif_meta_cache.as_ref())
+            } else {
+                raw
+            };
             return Ok(to_photo_metadata(
                 merged,
                 MetadataSource::RawExif,
@@ -301,7 +364,8 @@ fn resolve_metadata(
         }
     }
 
-    let jpg_meta = jpg_exif_meta.unwrap_or_default();
+    load_jpg_exif_meta();
+    let jpg_meta = jpg_exif_meta_cache.unwrap_or_default();
     Ok(to_photo_metadata(
         jpg_meta,
         MetadataSource::JpgExif,
@@ -309,6 +373,15 @@ fn resolve_metadata(
         original_name,
         jpg_path,
     ))
+}
+
+fn metadata_has_missing_fields(meta: &PartialMetadata) -> bool {
+    meta.date.is_none()
+        || meta.camera_make.is_none()
+        || meta.camera_model.is_none()
+        || meta.lens_make.is_none()
+        || meta.lens_model.is_none()
+        || meta.film_sim.is_none()
 }
 
 fn to_photo_metadata(
