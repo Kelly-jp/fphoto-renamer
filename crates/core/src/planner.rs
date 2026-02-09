@@ -104,6 +104,9 @@ pub fn generate_plan(options: &PlanOptions) -> Result<RenamePlan> {
         if !raw_input.exists() {
             anyhow::bail!("RAWフォルダが存在しません: {}", raw_input.display());
         }
+        if !raw_input.is_dir() {
+            anyhow::bail!("RAWフォルダではありません: {}", raw_input.display());
+        }
     }
 
     let parts = parse_template(&options.template)?;
@@ -361,13 +364,8 @@ fn resolve_metadata(
                     } else {
                         xmp_meta
                     };
-                    let metadata = to_photo_metadata(
-                        merged,
-                        source,
-                        fallback_date,
-                        original_name,
-                        jpg_path,
-                    );
+                    let metadata =
+                        to_photo_metadata(merged, source, fallback_date, original_name, jpg_path);
                     return Ok(ResolvedMetadata {
                         source_label: metadata_source_label(metadata.source, raw_path.as_deref()),
                         metadata,
@@ -679,9 +677,41 @@ mod tests {
         });
 
         let err = result.expect_err("plan generation should fail");
-        assert!(err
-            .to_string()
-            .contains(&format!("RAWフォルダが存在しません: {}", missing_raw_root.display())));
+        assert!(err.to_string().contains(&format!(
+            "RAWフォルダが存在しません: {}",
+            missing_raw_root.display()
+        )));
+    }
+
+    #[test]
+    fn generate_plan_fails_when_explicit_raw_path_is_not_directory() {
+        let temp = tempdir().expect("tempdir");
+        let jpg_root = temp.path().join("jpg");
+        fs::create_dir_all(&jpg_root).expect("jpg root");
+
+        let jpg_path = jpg_root.join("DSC00098.JPG");
+        fs::write(&jpg_path, b"not-a-real-jpg").expect("jpg file");
+
+        let raw_file = temp.path().join("raw-file.txt");
+        fs::write(&raw_file, b"not-a-folder").expect("raw file");
+
+        let result = generate_plan(&PlanOptions {
+            jpg_input: jpg_root,
+            raw_input: Some(raw_file.clone()),
+            raw_from_jpg_parent_when_missing: false,
+            recursive: false,
+            include_hidden: false,
+            template: "{orig_name}".to_string(),
+            dedupe_same_maker: true,
+            exclusions: Vec::new(),
+            max_filename_len: 240,
+        });
+
+        let err = result.expect_err("plan generation should fail");
+        assert!(err.to_string().contains(&format!(
+            "RAWフォルダではありません: {}",
+            raw_file.display()
+        )));
     }
 
     #[test]

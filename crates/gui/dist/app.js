@@ -141,11 +141,11 @@ function setMessage(text, isError = false) {
   el.message.style.color = isError ? "#dc2626" : "#0f5132";
 }
 
-function missingFolderErrorPrefixByField(field) {
+function folderErrorPrefixesByField(field) {
   if (field === "raw") {
-    return "変換失敗: RAWフォルダが存在しません";
+    return ["変換失敗: RAWフォルダが存在しません", "変換失敗: RAWフォルダではありません"];
   }
-  return "変換失敗: JPGフォルダが存在しません";
+  return ["変換失敗: JPGフォルダが存在しません"];
 }
 
 function clearMissingFolderErrorForFieldIfNeeded(field) {
@@ -159,7 +159,7 @@ function clearMissingFolderErrorForFieldIfNeeded(field) {
     return;
   }
 
-  if (currentMessage.startsWith(missingFolderErrorPrefixByField(field))) {
+  if (folderErrorPrefixesByField(field).some((prefix) => currentMessage.startsWith(prefix))) {
     setMessage("", false);
   }
 }

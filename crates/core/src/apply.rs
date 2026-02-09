@@ -1,9 +1,9 @@
 use crate::config::app_paths;
 use crate::planner::{RenameCandidate, RenamePlan};
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -53,41 +53,54 @@ pub fn apply_plan_with_options(plan: &RenamePlan, options: &ApplyOptions) -> Res
         });
     }
 
+    validate_apply_candidates(plan, &candidates)?;
+
     if options.backup_originals {
         backup_original_files(plan, &candidates)?;
     }
 
-    let mut first_phase = HashMap::<PathBuf, PathBuf>::new();
-
+    let mut staged = Vec::<StagedRename>::with_capacity(candidates.len());
     for (index, candidate) in candidates.iter().enumerate() {
-        let temp_path = temp_path_for(&candidate.original_path, index);
-        fs::rename(&candidate.original_path, &temp_path).with_context(|| {
-            format!(
+        let entry = StagedRename {
+            original_path: candidate.original_path.clone(),
+            target_path: candidate.target_path.clone(),
+            temp_path: temp_path_for(&candidate.original_path, index),
+        };
+        if let Err(err) = fs::rename(&entry.original_path, &entry.temp_path) {
+            let stage_err = anyhow::Error::from(err).context(format!(
                 "一時リネームに失敗しました: {} -> {}",
-                candidate.original_path.display(),
-                temp_path.display()
-            )
-        })?;
-        first_phase.insert(candidate.original_path.clone(), temp_path);
+                entry.original_path.display(),
+                entry.temp_path.display()
+            ));
+            if let Err(rollback_err) = rollback_staged_to_original_paths(&staged) {
+                return Err(stage_err.context(format!(
+                    "一時リネーム失敗後のロールバックにも失敗しました: {rollback_err}"
+                )));
+            }
+            return Err(stage_err);
+        }
+        staged.push(entry);
     }
 
     let mut operations = Vec::with_capacity(candidates.len());
-    for candidate in candidates {
-        let temp = first_phase
-            .get(&candidate.original_path)
-            .context("一時ファイル情報が見つかりません")?;
-
-        fs::rename(temp, &candidate.target_path).with_context(|| {
-            format!(
+    for (finalized, entry) in staged.iter().enumerate() {
+        if let Err(err) = fs::rename(&entry.temp_path, &entry.target_path) {
+            let apply_err = anyhow::Error::from(err).context(format!(
                 "最終リネームに失敗しました: {} -> {}",
-                temp.display(),
-                candidate.target_path.display()
-            )
-        })?;
+                entry.temp_path.display(),
+                entry.target_path.display()
+            ));
+            if let Err(rollback_err) = rollback_after_final_rename_failure(&staged, finalized) {
+                return Err(apply_err.context(format!(
+                    "最終リネーム失敗後のロールバックにも失敗しました: {rollback_err}"
+                )));
+            }
+            return Err(apply_err);
+        }
 
         operations.push(RenameOperation {
-            from: candidate.original_path.clone(),
-            to: candidate.target_path.clone(),
+            from: entry.original_path.clone(),
+            to: entry.target_path.clone(),
         });
     }
 
@@ -97,6 +110,111 @@ pub fn apply_plan_with_options(plan: &RenamePlan, options: &ApplyOptions) -> Res
         applied: operations.len(),
         unchanged: plan.candidates.len().saturating_sub(operations.len()),
     })
+}
+
+#[derive(Debug, Clone)]
+struct StagedRename {
+    original_path: PathBuf,
+    target_path: PathBuf,
+    temp_path: PathBuf,
+}
+
+fn validate_apply_candidates(plan: &RenamePlan, candidates: &[&RenameCandidate]) -> Result<()> {
+    let jpg_root = fs::canonicalize(&plan.jpg_root).with_context(|| {
+        format!(
+            "JPGルートを解決できませんでした: {}",
+            plan.jpg_root.display()
+        )
+    })?;
+    let mut seen_original_paths = HashSet::<PathBuf>::new();
+    let mut seen_target_paths = HashSet::<PathBuf>::new();
+
+    for candidate in candidates {
+        let original_canonical = fs::canonicalize(&candidate.original_path).with_context(|| {
+            format!(
+                "元ファイルを解決できませんでした: {}",
+                candidate.original_path.display()
+            )
+        })?;
+        if !original_canonical.starts_with(&jpg_root) {
+            bail!(
+                "JPGフォルダ外の元ファイルは適用できません: {}",
+                candidate.original_path.display()
+            );
+        }
+        if !seen_original_paths.insert(original_canonical) {
+            bail!(
+                "重複した元ファイルが含まれています: {}",
+                candidate.original_path.display()
+            );
+        }
+
+        let target_parent = candidate.target_path.parent().with_context(|| {
+            format!(
+                "リネーム先に親ディレクトリがありません: {}",
+                candidate.target_path.display()
+            )
+        })?;
+        let target_name = candidate.target_path.file_name().with_context(|| {
+            format!(
+                "リネーム先ファイル名が不正です: {}",
+                candidate.target_path.display()
+            )
+        })?;
+        let target_parent_canonical = fs::canonicalize(target_parent).with_context(|| {
+            format!(
+                "リネーム先親ディレクトリを解決できませんでした: {}",
+                target_parent.display()
+            )
+        })?;
+        if !target_parent_canonical.starts_with(&jpg_root) {
+            bail!(
+                "JPGフォルダ外のリネーム先は適用できません: {}",
+                candidate.target_path.display()
+            );
+        }
+        let normalized_target = target_parent_canonical.join(target_name);
+        if !seen_target_paths.insert(normalized_target) {
+            bail!(
+                "重複したリネーム先が含まれています: {}",
+                candidate.target_path.display()
+            );
+        }
+    }
+
+    Ok(())
+}
+
+fn rollback_staged_to_original_paths(staged: &[StagedRename]) -> Result<()> {
+    for entry in staged.iter().rev() {
+        if !entry.temp_path.exists() {
+            continue;
+        }
+        fs::rename(&entry.temp_path, &entry.original_path).with_context(|| {
+            format!(
+                "ロールバックに失敗しました: {} -> {}",
+                entry.temp_path.display(),
+                entry.original_path.display()
+            )
+        })?;
+    }
+    Ok(())
+}
+
+fn rollback_after_final_rename_failure(staged: &[StagedRename], finalized: usize) -> Result<()> {
+    for entry in staged[..finalized].iter().rev() {
+        if !entry.target_path.exists() {
+            continue;
+        }
+        fs::rename(&entry.target_path, &entry.temp_path).with_context(|| {
+            format!(
+                "ロールバック(退避)に失敗しました: {} -> {}",
+                entry.target_path.display(),
+                entry.temp_path.display()
+            )
+        })?;
+    }
+    rollback_staged_to_original_paths(staged)
 }
 
 fn backup_original_files(plan: &RenamePlan, candidates: &[&RenameCandidate]) -> Result<()> {
@@ -225,6 +343,22 @@ pub fn undo_last() -> Result<UndoResult> {
     })?;
     let log = serde_json::from_str::<UndoLog>(&raw).context("取り消しログが壊れています")?;
 
+    let restored = restore_operations(&log)?;
+
+    cleanup_backup_if_needed(&log)?;
+
+    fs::remove_file(&paths.undo_path).with_context(|| {
+        format!(
+            "取り消しログ削除に失敗しました: {}",
+            paths.undo_path.display()
+        )
+    })?;
+
+    Ok(UndoResult { restored })
+}
+
+fn restore_operations(log: &UndoLog) -> Result<usize> {
+    let mut restored = 0usize;
     for op in log.operations.iter().rev() {
         if !op.to.exists() {
             continue;
@@ -236,20 +370,9 @@ pub fn undo_last() -> Result<UndoResult> {
                 op.from.display()
             )
         })?;
+        restored += 1;
     }
-
-    cleanup_backup_if_needed(&log)?;
-
-    fs::remove_file(&paths.undo_path).with_context(|| {
-        format!(
-            "取り消しログ削除に失敗しました: {}",
-            paths.undo_path.display()
-        )
-    })?;
-
-    Ok(UndoResult {
-        restored: log.operations.len(),
-    })
+    Ok(restored)
 }
 
 fn persist_undo(
@@ -331,7 +454,8 @@ fn temp_path_for(original_path: &Path, index: usize) -> PathBuf {
 mod tests {
     use super::{
         apply_plan_with_options, cleanup_backup_if_needed, resolve_backup_path,
-        resolve_backup_path_with_reserved, unique_backup_path, ApplyOptions, UndoLog,
+        resolve_backup_path_with_reserved, restore_operations, unique_backup_path, ApplyOptions,
+        UndoLog,
     };
     use crate::metadata::{MetadataSource, PhotoMetadata};
     use crate::planner::{RenameCandidate, RenamePlan, RenameStats};
@@ -472,5 +596,182 @@ mod tests {
 
         assert_eq!(backup_a, backup_root.join("IMG_0001.JPG"));
         assert_eq!(backup_b, backup_root.join("IMG_0001_001.JPG"));
+    }
+
+    #[test]
+    fn apply_plan_rolls_back_when_final_rename_fails_midway() {
+        let temp = tempdir().expect("tempdir");
+        let jpg_root = temp.path().join("jpg");
+        fs::create_dir_all(&jpg_root).expect("create jpg root");
+
+        let original_a = jpg_root.join("IMG_A.JPG");
+        let original_b = jpg_root.join("IMG_B.JPG");
+        fs::write(&original_a, b"A").expect("write A");
+        fs::write(&original_b, b"B").expect("write B");
+
+        let blocked_dir = jpg_root.join("blocked");
+        fs::create_dir_all(&blocked_dir).expect("create blocked dir");
+        fs::write(blocked_dir.join("keep.txt"), b"x").expect("write keep");
+
+        let renamed_a = jpg_root.join("RENAMED_A.JPG");
+        let plan = RenamePlan {
+            jpg_root: jpg_root.clone(),
+            template: "{orig_name}".to_string(),
+            exclusions: Vec::new(),
+            candidates: vec![
+                RenameCandidate {
+                    original_path: original_a.clone(),
+                    target_path: renamed_a.clone(),
+                    metadata_source: MetadataSource::JpgExif,
+                    source_label: "jpg".to_string(),
+                    metadata: sample_metadata(original_a.clone()),
+                    rendered_base: "RENAMED_A".to_string(),
+                    changed: true,
+                },
+                RenameCandidate {
+                    original_path: original_b.clone(),
+                    target_path: blocked_dir.clone(),
+                    metadata_source: MetadataSource::JpgExif,
+                    source_label: "jpg".to_string(),
+                    metadata: sample_metadata(original_b.clone()),
+                    rendered_base: "blocked".to_string(),
+                    changed: true,
+                },
+            ],
+            stats: RenameStats::default(),
+        };
+
+        let err = apply_plan_with_options(&plan, &ApplyOptions::default())
+            .expect_err("second phase should fail");
+        assert!(err.to_string().contains("最終リネームに失敗しました"));
+
+        assert!(original_a.exists(), "original A should be restored");
+        assert!(original_b.exists(), "original B should be restored");
+        assert!(!renamed_a.exists(), "renamed A should be rolled back");
+
+        let has_temp = fs::read_dir(&jpg_root)
+            .expect("read jpg root")
+            .flatten()
+            .any(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".fphoto_tmp_")
+            });
+        assert!(!has_temp, "temporary files should not remain");
+    }
+
+    #[test]
+    fn apply_plan_rejects_target_outside_jpg_root() {
+        let temp = tempdir().expect("tempdir");
+        let jpg_root = temp.path().join("jpg");
+        let outside_root = temp.path().join("outside");
+        fs::create_dir_all(&jpg_root).expect("create jpg root");
+        fs::create_dir_all(&outside_root).expect("create outside root");
+
+        let original = jpg_root.join("IMG_0001.JPG");
+        fs::write(&original, b"x").expect("write original");
+        let outside_target = outside_root.join("RENAMED.JPG");
+        let plan = RenamePlan {
+            jpg_root: jpg_root.clone(),
+            template: "{orig_name}".to_string(),
+            exclusions: Vec::new(),
+            candidates: vec![RenameCandidate {
+                original_path: original.clone(),
+                target_path: outside_target,
+                metadata_source: MetadataSource::JpgExif,
+                source_label: "jpg".to_string(),
+                metadata: sample_metadata(original.clone()),
+                rendered_base: "RENAMED".to_string(),
+                changed: true,
+            }],
+            stats: RenameStats::default(),
+        };
+
+        let err = apply_plan_with_options(&plan, &ApplyOptions::default())
+            .expect_err("outside target should be rejected");
+        assert!(err
+            .to_string()
+            .contains("JPGフォルダ外のリネーム先は適用できません"));
+        assert!(original.exists(), "original file should stay untouched");
+    }
+
+    #[test]
+    fn apply_plan_rejects_duplicate_targets() {
+        let temp = tempdir().expect("tempdir");
+        let jpg_root = temp.path().join("jpg");
+        fs::create_dir_all(&jpg_root).expect("create jpg root");
+
+        let original_a = jpg_root.join("IMG_A.JPG");
+        let original_b = jpg_root.join("IMG_B.JPG");
+        fs::write(&original_a, b"A").expect("write A");
+        fs::write(&original_b, b"B").expect("write B");
+
+        let duplicate_target = jpg_root.join("SAME.JPG");
+        let plan = RenamePlan {
+            jpg_root: jpg_root.clone(),
+            template: "{orig_name}".to_string(),
+            exclusions: Vec::new(),
+            candidates: vec![
+                RenameCandidate {
+                    original_path: original_a.clone(),
+                    target_path: duplicate_target.clone(),
+                    metadata_source: MetadataSource::JpgExif,
+                    source_label: "jpg".to_string(),
+                    metadata: sample_metadata(original_a.clone()),
+                    rendered_base: "SAME".to_string(),
+                    changed: true,
+                },
+                RenameCandidate {
+                    original_path: original_b.clone(),
+                    target_path: duplicate_target,
+                    metadata_source: MetadataSource::JpgExif,
+                    source_label: "jpg".to_string(),
+                    metadata: sample_metadata(original_b.clone()),
+                    rendered_base: "SAME".to_string(),
+                    changed: true,
+                },
+            ],
+            stats: RenameStats::default(),
+        };
+
+        let err = apply_plan_with_options(&plan, &ApplyOptions::default())
+            .expect_err("duplicate targets should be rejected");
+        assert!(err
+            .to_string()
+            .contains("重複したリネーム先が含まれています"));
+        assert!(original_a.exists());
+        assert!(original_b.exists());
+    }
+
+    #[test]
+    fn restore_operations_counts_only_existing_targets() {
+        let temp = tempdir().expect("tempdir");
+        let from_a = temp.path().join("A.JPG");
+        let to_a = temp.path().join("RENAMED_A.JPG");
+        let from_b = temp.path().join("B.JPG");
+        let to_b = temp.path().join("RENAMED_B.JPG");
+        fs::write(&to_a, b"A").expect("write renamed A");
+
+        let log = UndoLog {
+            operations: vec![
+                super::RenameOperation {
+                    from: from_a.clone(),
+                    to: to_a.clone(),
+                },
+                super::RenameOperation {
+                    from: from_b.clone(),
+                    to: to_b,
+                },
+            ],
+            backup_originals: false,
+            jpg_root: None,
+        };
+
+        let restored = restore_operations(&log).expect("restore should succeed");
+        assert_eq!(restored, 1);
+        assert!(from_a.exists());
+        assert!(!to_a.exists());
+        assert!(!from_b.exists());
     }
 }
