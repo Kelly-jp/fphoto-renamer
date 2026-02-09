@@ -873,6 +873,7 @@ async function handleDroppedPath(rawPath, field, source = "window") {
   state.pendingZoneDropField = null;
   state.pendingTauriPath = null;
   await setFolderPathToField(rawPath, field);
+  renderEmptyConvertLog();
   rememberHandledDrop(rawPath, field, source);
 }
 

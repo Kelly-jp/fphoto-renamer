@@ -16,6 +16,23 @@ async function getMockCalls(page, cmd = null) {
   }, cmd);
 }
 
+async function dropPathToZone(page, zoneId, path) {
+  await page.evaluate(
+    ({ zoneId: targetZoneId, path: droppedPath }) => {
+      const zone = document.getElementById(targetZoneId);
+      const dataTransfer = new DataTransfer();
+      dataTransfer.setData("text/plain", droppedPath);
+      const event = new DragEvent("drop", {
+        bubbles: true,
+        cancelable: true,
+        dataTransfer,
+      });
+      zone.dispatchEvent(event);
+    },
+    { zoneId, path }
+  );
+}
+
 test.describe("Browser UI smoke", () => {
   test("初期表示で主要要素が表示される", async ({ page }) => {
     await openWithMock(page, {
@@ -205,22 +222,30 @@ test.describe("Browser UI smoke", () => {
   test("ドロップ操作でJPG入力へパスを反映できる", async ({ page }) => {
     await openWithMock(page, {});
 
-    await page.evaluate(() => {
-      const zone = document.getElementById("jpgDropZone");
-      const dataTransfer = new DataTransfer();
-      dataTransfer.setData("text/plain", " /tmp/dropped-jpg ");
-      const event = new DragEvent("drop", {
-        bubbles: true,
-        cancelable: true,
-        dataTransfer,
-      });
-      zone.dispatchEvent(event);
-    });
+    await page.fill("#jpgInput", "/tmp/mock-jpg");
+    await page.click("#applyBtn");
+    await expect(page.locator("#convertLog")).toContainText("✅ IMG_0001.JPG");
+
+    await dropPathToZone(page, "jpgDropZone", " /tmp/dropped-jpg ");
 
     await expect(page.locator("#jpgInput")).toHaveValue("/tmp/dropped-jpg");
+    await expect(page.locator("#convertLog")).toContainText("まだ変換ログはありません");
     await expect(page.locator("#applyBtn")).toBeEnabled();
     const normalizeCalls = await getMockCalls(page, "normalize_to_folder_cmd");
     expect(normalizeCalls.length).toBeGreaterThan(0);
+  });
+
+  test("ドロップ操作でRAW入力へパスを反映した際にログを初期化する", async ({ page }) => {
+    await openWithMock(page, {});
+
+    await page.fill("#jpgInput", "/tmp/mock-jpg");
+    await page.click("#applyBtn");
+    await expect(page.locator("#convertLog")).toContainText("✅ IMG_0001.JPG");
+
+    await dropPathToZone(page, "rawDropZone", "/tmp/dropped-raw");
+
+    await expect(page.locator("#rawInput")).toHaveValue("/tmp/dropped-raw");
+    await expect(page.locator("#convertLog")).toContainText("まだ変換ログはありません");
   });
 
   test("テンプレート入力時に禁止文字を自動除去する", async ({ page }) => {
