@@ -10,11 +10,17 @@ macOS/Windows 向けの JPG リネームツールです。CLI と Tauri GUI は�
 - ルートディレクトリ: `fphoto-renamer`
 - GUI 実行時:
   - macOS: WebKit が利用可能な通常環境
-  - Windows: WebView2 Runtime が利用可能な環境
+  - Windows: WebView2 Runtime が利用可能な環境（`cargo run` などローカル実行時）
 - EXIF 取得は `exiftool`（`-stay_open`）優先
-  - 同梱しない場合: `exiftool` を PATH にインストール
-  - 同梱する場合: `crates/gui/src-tauri/resources/bin/<os>/` に配置
-  - 同梱する場合: `crates/gui/src-tauri/resources/LICENSES/EXIFTOOL_LICENSE.txt` も必ず同梱
+  - 開発時に同梱しない場合: `exiftool` を PATH にインストール
+  - インストーラビルド時: CI が `crates/gui/src-tauri/resources/bin/<os>/` へ自動同梱
+  - 同梱時は `crates/gui/src-tauri/resources/LICENSES/EXIFTOOL_LICENSE.txt` も必ず同梱
+
+## 配布インストーラの依存同梱
+
+- GitHub Actions の `Build Installers` は macOS/Windows 向けに `exiftool` を自動同梱します。
+- Windows MSI は `webviewInstallMode=offlineInstaller` で WebView2 Runtime を同梱します。
+- そのため、配布インストーラ版はエンドユーザー側で追加インストール不要です。
 
 ### Debug ビルド
 
@@ -191,4 +197,5 @@ npm run test:ui
 ## ExifTool 同梱時のライセンス対応
 
 - ExifTool 同梱時は `crates/gui/src-tauri/resources/LICENSES/EXIFTOOL_LICENSE.txt` を更新・同梱してください。
-- CI では `scripts/verify_exiftool_license.sh` により、同梱バイナリがある場合にライセンス文書の存在を検証します。
+- CI では `scripts/prepare_bundled_exiftool.sh` で同梱素材を生成し、
+  `scripts/verify_exiftool_license.sh` で同梱バイナリとライセンス文書の両方を必須検証します。

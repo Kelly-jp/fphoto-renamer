@@ -9,6 +9,8 @@ on:
 jobs:
   build-installer:
     runs-on: ${{ matrix.os }}
+    env:
+      EXIFTOOL_VERSION: "13.50"
     strategy:
       fail-fast: false
       matrix:
@@ -17,12 +19,12 @@ jobs:
             bundle: dmg
             ext: dmg
             artifact_name: installer-macos-dmg
-            resource_glob: resources/bin/macos/*
+            resource_glob: resources/bin/macos/**
           - os: windows-latest
             bundle: msi
             ext: msi
             artifact_name: installer-windows-msi
-            resource_glob: resources/bin/windows/*
+            resource_glob: resources/bin/windows/**
 
     steps:
       - name: Checkout
@@ -46,6 +48,11 @@ jobs:
             cargo install tauri-cli --locked --version "^2.0"
           fi
 
+      - name: Prepare bundled ExifTool
+        shell: bash
+        run: |
+          bash scripts/prepare_bundled_exiftool.sh "${{ matrix.os }}" "${EXIFTOOL_VERSION}"
+
       - name: Verify ExifTool license bundle
         shell: bash
         run: |
@@ -56,7 +63,7 @@ jobs:
         run: |
           cd crates/gui/src-tauri
           CONFIG_JSON=$(cat <<EOF
-          {"bundle":{"active":true,"resources":["${{ matrix.resource_glob }}","resources/LICENSES/*"]}}
+          {"bundle":{"active":true,"resources":["${{ matrix.resource_glob }}","resources/LICENSES/*"],"windows":{"webviewInstallMode":{"type":"offlineInstaller","silent":true}}}}
           EOF
           )
           cargo tauri build \

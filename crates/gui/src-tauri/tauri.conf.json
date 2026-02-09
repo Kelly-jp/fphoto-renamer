@@ -33,9 +33,15 @@
     ],
     "copyright": "Copyright (c) 2026 Kelly-jp. All rights reserved.",
     "resources": [
-      "resources/bin/macos/*",
-      "resources/bin/windows/*",
+      "resources/bin/macos/**",
+      "resources/bin/windows/**",
       "resources/LICENSES/*"
-    ]
+    ],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "offlineInstaller",
+        "silent": true
+      }
+    }
   }
 }

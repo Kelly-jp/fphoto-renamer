@@ -1,4 +1,8 @@
-このディレクトリに Linux 用 `exiftool` 実行ファイルを配置してください。
+このディレクトリには Linux 用 `exiftool` を同梱します。
 
-- ファイル名: `exiftool`
-- 実行権限: 必要 (`chmod +x exiftool`)
+必要な構成:
+
+- `exiftool`（実行権限付き）
+- `lib/`（`Image/ExifTool.pm` を含むランタイムライブラリ）
+
+通常は `scripts/prepare_bundled_exiftool.sh ubuntu-latest` を使って配置してください。

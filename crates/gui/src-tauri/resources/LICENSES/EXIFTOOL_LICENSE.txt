@@ -13,6 +13,7 @@ Official references:
 
 - ExifTool project page: https://exiftool.org/
 - Perl licensing information: https://dev.perl.org/licenses/
+- Bundled version is pinned in `.github/workflows/installer.yml` (`EXIFTOOL_VERSION`)
 
 When updating the bundled ExifTool binary, verify that the above license terms
 still match the bundled version and update this notice if needed.
