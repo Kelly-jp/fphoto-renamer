@@ -141,6 +141,29 @@ function setMessage(text, isError = false) {
   el.message.style.color = isError ? "#dc2626" : "#0f5132";
 }
 
+function missingFolderErrorPrefixByField(field) {
+  if (field === "raw") {
+    return "変換失敗: RAWフォルダが存在しません";
+  }
+  return "変換失敗: JPGフォルダが存在しません";
+}
+
+function clearMissingFolderErrorForFieldIfNeeded(field) {
+  const input = targetInputByField(field);
+  if (input.value.trim().length > 0) {
+    return;
+  }
+
+  const currentMessage = (el.message.textContent || "").trim();
+  if (!currentMessage) {
+    return;
+  }
+
+  if (currentMessage.startsWith(missingFolderErrorPrefixByField(field))) {
+    setMessage("", false);
+  }
+}
+
 function removeDisallowedTemplateChars(value) {
   return String(value).replace(TEMPLATE_DISALLOWED_CHAR_GLOBAL, "");
 }
@@ -898,6 +921,7 @@ async function clearFolder(field) {
 
   input.value = "";
   updateApplyButton();
+  clearMissingFolderErrorForFieldIfNeeded(field);
 
   if (field === "jpg") {
     clearPlanState();
@@ -1168,7 +1192,13 @@ function bindEvents() {
   el.jpgClearBtn.addEventListener("click", () => clearFolder("jpg"));
   el.rawBrowseBtn.addEventListener("click", () => onBrowse("raw"));
   el.rawClearBtn.addEventListener("click", () => clearFolder("raw"));
-  el.jpgInput.addEventListener("input", updateApplyButton);
+  el.jpgInput.addEventListener("input", () => {
+    updateApplyButton();
+    clearMissingFolderErrorForFieldIfNeeded("jpg");
+  });
+  el.rawInput.addEventListener("input", () => {
+    clearMissingFolderErrorForFieldIfNeeded("raw");
+  });
 
   bindDropTarget("jpg");
   bindDropTarget("raw");

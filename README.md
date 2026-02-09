@@ -80,6 +80,7 @@ Windows (PowerShell) の例:
 
 - JPG フォルダ必須、RAW フォルダ任意
 - RAW フォルダ指定時は同名ベースで探索し、優先順位は `XMP -> DNG -> RAF`
+- RAW フォルダを明示指定した場合、そのフォルダが存在しないとエラー（JPG へはフォールバックしない）
 - RAW フォルダ未指定時に、JPG フォルダの1つ上の階層を RAW 探索ルートにするオプション（CLI/GUI）
 - メタデータ取得優先順位: `XMP -> RAW EXIF -> JPG EXIF`
 - XMP の欠損項目は RAW EXIF で補完し、さらに不足分は JPG EXIF で補完

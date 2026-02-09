@@ -218,6 +218,41 @@ test.describe("Browser UI smoke", () => {
     await expect(page.locator("#convertLog")).toContainText("まだ変換ログはありません");
   });
 
+  test("JPGフォルダ未存在エラーはJPGクリアで消える", async ({ page }) => {
+    await openWithMock(page, {
+      failCommands: {
+        generate_plan_cmd: "JPGフォルダが存在しません: /tmp/missing-jpg",
+      },
+    });
+
+    await page.fill("#jpgInput", "/tmp/missing-jpg");
+    await page.click("#applyBtn");
+    await expect(page.locator("#actionMessage")).toContainText(
+      "変換失敗: JPGフォルダが存在しません: /tmp/missing-jpg"
+    );
+
+    await page.click("#jpgClearBtn");
+    await expect(page.locator("#actionMessage")).toHaveText("");
+  });
+
+  test("RAWフォルダ未存在エラーはRAWクリアで消える", async ({ page }) => {
+    await openWithMock(page, {
+      failCommands: {
+        generate_plan_cmd: "RAWフォルダが存在しません: /tmp/missing-raw",
+      },
+    });
+
+    await page.fill("#jpgInput", "/tmp/mock-jpg");
+    await page.fill("#rawInput", "/tmp/missing-raw");
+    await page.click("#applyBtn");
+    await expect(page.locator("#actionMessage")).toContainText(
+      "変換失敗: RAWフォルダが存在しません: /tmp/missing-raw"
+    );
+
+    await page.click("#rawClearBtn");
+    await expect(page.locator("#actionMessage")).toHaveText("");
+  });
+
   test("設定変更はデバウンスで保存され最終値のみ送信される", async ({ page }) => {
     await openWithMock(page, {});
 

@@ -100,6 +100,11 @@ pub fn generate_plan(options: &PlanOptions) -> Result<RenamePlan> {
     if !options.jpg_input.exists() {
         anyhow::bail!("JPGフォルダが存在しません: {}", options.jpg_input.display());
     }
+    if let Some(raw_input) = options.raw_input.as_ref() {
+        if !raw_input.exists() {
+            anyhow::bail!("RAWフォルダが存在しません: {}", raw_input.display());
+        }
+    }
 
     let parts = parse_template(&options.template)?;
     let effective_raw_input = resolve_effective_raw_input(options);
@@ -649,6 +654,62 @@ mod tests {
         assert_eq!(c.metadata_source, MetadataSource::Xmp);
         assert_eq!(c.source_label, "xmp");
         assert_eq!(c.metadata.camera_make.as_deref(), Some("FUJIFILM"));
+    }
+
+    #[test]
+    fn generate_plan_fails_when_explicit_raw_folder_is_missing() {
+        let temp = tempdir().expect("tempdir");
+        let jpg_root = temp.path().join("jpg");
+        fs::create_dir_all(&jpg_root).expect("jpg root");
+
+        let jpg_path = jpg_root.join("DSC00099.JPG");
+        fs::write(&jpg_path, b"not-a-real-jpg").expect("jpg file");
+
+        let missing_raw_root = temp.path().join("missing-raw");
+        let result = generate_plan(&PlanOptions {
+            jpg_input: jpg_root,
+            raw_input: Some(missing_raw_root.clone()),
+            raw_from_jpg_parent_when_missing: false,
+            recursive: false,
+            include_hidden: false,
+            template: "{orig_name}".to_string(),
+            dedupe_same_maker: true,
+            exclusions: Vec::new(),
+            max_filename_len: 240,
+        });
+
+        let err = result.expect_err("plan generation should fail");
+        assert!(err
+            .to_string()
+            .contains(&format!("RAWフォルダが存在しません: {}", missing_raw_root.display())));
+    }
+
+    #[test]
+    fn generate_plan_falls_back_to_jpg_when_raw_file_is_missing() {
+        let temp = tempdir().expect("tempdir");
+        let jpg_root = temp.path().join("jpg");
+        let raw_root = temp.path().join("raw");
+        fs::create_dir_all(&jpg_root).expect("jpg root");
+        fs::create_dir_all(&raw_root).expect("raw root");
+
+        let jpg_path = jpg_root.join("DSC00100.JPG");
+        fs::write(&jpg_path, b"not-a-real-jpg").expect("jpg file");
+
+        let plan = generate_plan(&PlanOptions {
+            jpg_input: jpg_root,
+            raw_input: Some(raw_root),
+            raw_from_jpg_parent_when_missing: false,
+            recursive: false,
+            include_hidden: false,
+            template: "{orig_name}".to_string(),
+            dedupe_same_maker: true,
+            exclusions: Vec::new(),
+            max_filename_len: 240,
+        })
+        .expect("plan generation should succeed");
+
+        assert_eq!(plan.candidates.len(), 1);
+        assert_eq!(plan.candidates[0].source_label, "jpg");
     }
 
     #[test]
