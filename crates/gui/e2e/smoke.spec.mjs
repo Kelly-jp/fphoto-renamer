@@ -104,10 +104,18 @@ test.describe("Browser UI smoke", () => {
     await page.fill("#jpgInput", "/tmp/mock-jpg");
     await page.click("#applyBtn");
 
-    await expect(page.locator("#convertLog")).toContainText(/✅ IMG_1001\.JPG\s*→ RENAMED_1001\.JPG \(xmp\)/);
-    await expect(page.locator("#convertLog")).toContainText(/✅ IMG_1002\.JPG\s*→ RENAMED_1002\.JPG \(raf\)/);
-    await expect(page.locator("#convertLog")).toContainText(/✅ IMG_1003\.JPG\s*→ RENAMED_1003\.JPG \(dng\)/);
-    await expect(page.locator("#convertLog")).toContainText(/⏭️ IMG_1004\.JPG\s*→ IMG_1004\.JPG \(jpg\)/);
+    await expect(page.locator("#convertLog")).toContainText(
+      /✅ IMG_1001\.JPG\s*→ RENAMED_1001\.JPG \(情報取得元:xmp\)/
+    );
+    await expect(page.locator("#convertLog")).toContainText(
+      /✅ IMG_1002\.JPG\s*→ RENAMED_1002\.JPG \(情報取得元:raf\)/
+    );
+    await expect(page.locator("#convertLog")).toContainText(
+      /✅ IMG_1003\.JPG\s*→ RENAMED_1003\.JPG \(情報取得元:dng\)/
+    );
+    await expect(page.locator("#convertLog")).toContainText(
+      /⏭️ IMG_1004\.JPG\s*→ IMG_1004\.JPG \(情報取得元:jpg\)/
+    );
   });
 
   test("変換中はボタンやテキスト入力を無効化する", async ({ page }) => {

@@ -378,7 +378,7 @@ function renderEmptyConvertLog() {
 
 function appendSingleConvertLogEntry(entry) {
   const li = document.createElement("li");
-  const sourceSuffix = entry.source ? ` (${entry.source})` : "";
+  const sourceSuffix = entry.source ? ` (情報取得元:${entry.source})` : "";
   const originalLine = document.createElement("span");
   originalLine.textContent = `${entry.emoji} ${entry.original}`;
   const targetLine = document.createElement("span");
