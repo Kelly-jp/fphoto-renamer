@@ -24,6 +24,7 @@ export function installTauriMock(options = {}) {
   const fail = (message) => {
     throw new Error(message);
   };
+  const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
   const trimString = (value) => (typeof value === "string" ? value.trim() : "");
   const normalizeFolder = (value) => value.replace(/\\/g, "/").replace(/\/+$/, "");
@@ -95,6 +96,10 @@ export function installTauriMock(options = {}) {
             };
           }
           case "apply_plan_cmd": {
+            const applyDelayMs = Number(options.applyDelayMs);
+            if (Number.isFinite(applyDelayMs) && applyDelayMs > 0) {
+              await wait(applyDelayMs);
+            }
             const applied =
               Number.isFinite(options.applied) && Number(options.applied) >= 0
                 ? Number(options.applied)

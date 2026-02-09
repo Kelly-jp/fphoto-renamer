@@ -21,6 +21,8 @@ const TEMPLATE_DISALLOWED_CHAR_GLOBAL = /[\\/:*?"<>|]/g;
 const state = {
   exclusions: [],
   plan: null,
+  undoEnabled: false,
+  isApplying: false,
   templateValid: false,
   templateValidationMessage: "",
   hoverField: null,
@@ -372,11 +374,56 @@ async function refreshSampleRealtime() {
 }
 
 function updateApplyButton() {
-  el.applyBtn.disabled = !(state.templateValid && el.jpgInput.value.trim().length > 0);
+  const canApply = state.templateValid && el.jpgInput.value.trim().length > 0;
+  el.applyBtn.disabled = state.isApplying || !canApply;
 }
 
 function setUndoButtonEnabled(enabled) {
-  el.undoBtn.disabled = !enabled;
+  state.undoEnabled = Boolean(enabled);
+  el.undoBtn.disabled = state.isApplying || !state.undoEnabled;
+}
+
+function setInteractionLocked(locked) {
+  for (const control of [
+    el.jpgInput,
+    el.rawInput,
+    el.jpgBrowseBtn,
+    el.jpgClearBtn,
+    el.rawBrowseBtn,
+    el.rawClearBtn,
+    el.rawParentIfMissing,
+    el.templateInput,
+    el.resetTemplateBtn,
+    el.dedupeSameMaker,
+    el.backupOriginals,
+    el.excludeInput,
+    el.addExcludeBtn,
+    el.applyBtn,
+    el.undoBtn,
+  ]) {
+    control.disabled = locked;
+  }
+
+  for (const button of el.tokenButtons.querySelectorAll("button")) {
+    button.disabled = locked;
+  }
+  for (const button of el.excludeList.querySelectorAll("button")) {
+    button.disabled = locked;
+  }
+}
+
+function startApplyLock() {
+  state.isApplying = true;
+  setInteractionLocked(true);
+  updateApplyButton();
+  setUndoButtonEnabled(state.undoEnabled);
+}
+
+function endApplyLock() {
+  state.isApplying = false;
+  setInteractionLocked(false);
+  updateApplyButton();
+  setUndoButtonEnabled(state.undoEnabled);
 }
 
 function clearPlanState() {
@@ -394,7 +441,13 @@ async function generatePlanForApply() {
 }
 
 async function onApply() {
+  if (state.isApplying) {
+    return;
+  }
+
   let plan = null;
+  startApplyLock();
+  setMessage("変換中...", false);
   try {
     const valid = await validateTemplate();
     if (!valid) {
@@ -422,10 +475,16 @@ async function onApply() {
       renderConvertLogEntries(buildLogEntriesFromPlan(plan, "❌"));
     }
     setMessage(`変換失敗: ${toErrorMessage(error)}`, true);
+  } finally {
+    endApplyLock();
   }
 }
 
 async function onUndo() {
+  if (state.isApplying) {
+    return;
+  }
+
   try {
     const result = await invokeCommand("undo_last_cmd");
     const undoEntries = state.plan
@@ -857,6 +916,9 @@ function rememberHandledDrop(path, field, source) {
 
 async function handleDroppedPath(rawPath, field, source = "window") {
   if (!rawPath) {
+    return;
+  }
+  if (state.isApplying) {
     return;
   }
 

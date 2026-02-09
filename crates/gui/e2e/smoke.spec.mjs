@@ -91,6 +91,35 @@ test.describe("Browser UI smoke", () => {
     expect(invokedCommands).toContain("apply_plan_cmd");
   });
 
+  test("変換中はボタンやテキスト入力を無効化する", async ({ page }) => {
+    await openWithMock(page, {
+      applyDelayMs: 500,
+    });
+
+    await page.fill("#jpgInput", "/tmp/mock-jpg");
+    await page.click("#applyBtn");
+
+    await expect(page.locator("#actionMessage")).toContainText("変換中...");
+    await expect(page.locator("#jpgInput")).toBeDisabled();
+    await expect(page.locator("#rawInput")).toBeDisabled();
+    await expect(page.locator("#templateInput")).toBeDisabled();
+    await expect(page.locator("#excludeInput")).toBeDisabled();
+    await expect(page.locator("#jpgBrowseBtn")).toBeDisabled();
+    await expect(page.locator("#rawBrowseBtn")).toBeDisabled();
+    await expect(page.locator("#applyBtn")).toBeDisabled();
+    await expect(page.locator("#undoBtn")).toBeDisabled();
+    await expect(page.locator("#tokenButtons button").first()).toBeDisabled();
+
+    await expect(page.locator("#actionMessage")).toContainText("変換完了: 1件");
+    await expect(page.locator("#jpgInput")).toBeEditable();
+    await expect(page.locator("#rawInput")).toBeEditable();
+    await expect(page.locator("#templateInput")).toBeEditable();
+    await expect(page.locator("#excludeInput")).toBeEditable();
+    await expect(page.locator("#jpgBrowseBtn")).toBeEnabled();
+    await expect(page.locator("#rawBrowseBtn")).toBeEnabled();
+    await expect(page.locator("#applyBtn")).toBeEnabled();
+  });
+
   test("削除文字列の追加と重複除外が機能する", async ({ page }) => {
     await openWithMock(page, {});
 
