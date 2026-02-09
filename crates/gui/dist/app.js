@@ -46,7 +46,7 @@ const el = {
   rawParentIfMissing: document.getElementById("rawParentIfMissing"),
   templateInput: document.getElementById("templateInput"),
   resetTemplateBtn: document.getElementById("resetTemplateBtn"),
-  dedupeSameMake: document.getElementById("dedupeSameMake"),
+  dedupeSameMaker: document.getElementById("dedupeSameMaker"),
   backupOriginals: document.getElementById("backupOriginals"),
   tokenButtons: document.getElementById("tokenButtons"),
   templateError: document.getElementById("templateError"),
@@ -97,6 +97,9 @@ async function loadPersistedSettings() {
         .map((value) => removeDisallowedTemplateChars(value).trim())
         .filter((value) => value.length > 0);
     }
+    if (settings && typeof settings.dedupeSameMaker === "boolean") {
+      el.dedupeSameMaker.checked = settings.dedupeSameMaker;
+    }
     if (settings && typeof settings.backupOriginals === "boolean") {
       el.backupOriginals.checked = settings.backupOriginals;
     }
@@ -113,6 +116,7 @@ async function persistSettings() {
     request: {
       template: el.templateInput.value,
       exclusions: [...state.exclusions],
+      dedupeSameMaker: el.dedupeSameMaker.checked,
       backupOriginals: el.backupOriginals.checked,
       rawParentIfMissing: el.rawParentIfMissing.checked,
     },
@@ -264,7 +268,7 @@ function toPlanRequest() {
     recursive: false,
     includeHidden: false,
     template: el.templateInput.value,
-    dedupeSameMake: el.dedupeSameMake.checked,
+    dedupeSameMaker: el.dedupeSameMaker.checked,
     exclusions: currentDeleteStrings(),
     maxFilenameLen: 240,
   };
@@ -354,7 +358,7 @@ async function refreshSampleRealtime() {
 
   const request = {
     template: el.templateInput.value,
-    dedupeSameMake: el.dedupeSameMake.checked,
+    dedupeSameMaker: el.dedupeSameMaker.checked,
     exclusions: currentDeleteStrings(),
     maxFilenameLen: 240,
   };
@@ -1098,7 +1102,8 @@ function bindEvents() {
   });
   el.backupOriginals.addEventListener("change", schedulePersistSettings);
   el.rawParentIfMissing.addEventListener("change", schedulePersistSettings);
-  el.dedupeSameMake.addEventListener("change", async () => {
+  el.dedupeSameMaker.addEventListener("change", async () => {
+    schedulePersistSettings();
     await refreshSampleRealtime();
   });
   el.applyBtn.addEventListener("click", onApply);

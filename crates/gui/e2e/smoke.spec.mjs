@@ -23,6 +23,7 @@ test.describe("Browser UI smoke", () => {
       settings: {
         template: "{year}{month}{day}_{orig_name}",
         exclusions: ["-NR"],
+        dedupeSameMaker: true,
         backupOriginals: false,
         rawParentIfMissing: false,
       },
@@ -40,6 +41,16 @@ test.describe("Browser UI smoke", () => {
     expect(invokedCommands).toContain("load_gui_settings_cmd");
     expect(invokedCommands).toContain("validate_template_cmd");
     expect(invokedCommands).toContain("render_fixed_sample_cmd");
+  });
+
+  test("保存済み設定のdedupe状態をチェックボックスへ反映する", async ({ page }) => {
+    await openWithMock(page, {
+      settings: {
+        dedupeSameMaker: false,
+      },
+    });
+
+    await expect(page.locator("#dedupeSameMaker")).not.toBeChecked();
   });
 
   test("JPG入力後に変換実行できログが出る", async ({ page }) => {
@@ -147,6 +158,7 @@ test.describe("Browser UI smoke", () => {
 
     await page.evaluate(() => {
       const template = document.querySelector("#templateInput");
+      const dedupe = document.querySelector("#dedupeSameMaker");
       const backup = document.querySelector("#backupOriginals");
       const rawParent = document.querySelector("#rawParentIfMissing");
 
@@ -159,6 +171,8 @@ test.describe("Browser UI smoke", () => {
       backup.dispatchEvent(new Event("change", { bubbles: true }));
       rawParent.checked = true;
       rawParent.dispatchEvent(new Event("change", { bubbles: true }));
+      dedupe.checked = false;
+      dedupe.dispatchEvent(new Event("change", { bubbles: true }));
     });
 
     await page.waitForTimeout(450);
@@ -168,6 +182,7 @@ test.describe("Browser UI smoke", () => {
     expect(saveCalls[0].payload.request).toEqual({
       template: "{year}_AB",
       exclusions: ["-NR"],
+      dedupeSameMaker: false,
       backupOriginals: true,
       rawParentIfMissing: true,
     });
@@ -257,7 +272,7 @@ test.describe("Browser UI smoke", () => {
     await page.fill("#rawInput", "/tmp/mock-raw");
     await page.check("#backupOriginals");
     await page.check("#rawParentIfMissing");
-    await page.uncheck("#dedupeSameMake");
+    await page.uncheck("#dedupeSameMaker");
     await page.fill("#excludeInput", "-pending");
     await page.click("#applyBtn");
 
@@ -267,7 +282,7 @@ test.describe("Browser UI smoke", () => {
     expect(request.jpgInput).toBe("/tmp/mock-jpg");
     expect(request.rawInput).toBe("/tmp/mock-raw");
     expect(request.rawParentIfMissing).toBe(true);
-    expect(request.dedupeSameMake).toBe(false);
+    expect(request.dedupeSameMaker).toBe(false);
     expect(request.exclusions).toEqual(["-NR", "-pending"]);
 
     const applyCalls = await getMockCalls(page, "apply_plan_cmd");

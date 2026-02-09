@@ -27,7 +27,7 @@ struct PlanRequest {
     include_hidden: bool,
     template: String,
     #[serde(default = "default_true")]
-    dedupe_same_make: bool,
+    dedupe_same_maker: bool,
     exclusions: Vec<String>,
     max_filename_len: Option<usize>,
 }
@@ -37,7 +37,7 @@ struct PlanRequest {
 struct SampleRequest {
     template: String,
     #[serde(default = "default_true")]
-    dedupe_same_make: bool,
+    dedupe_same_maker: bool,
     exclusions: Vec<String>,
     metadata: fphoto_renamer_core::PhotoMetadata,
     extension_with_dot: String,
@@ -49,7 +49,7 @@ struct SampleRequest {
 struct FixedSampleRequest {
     template: String,
     #[serde(default = "default_true")]
-    dedupe_same_make: bool,
+    dedupe_same_maker: bool,
     exclusions: Vec<String>,
     max_filename_len: Option<usize>,
 }
@@ -59,6 +59,7 @@ struct FixedSampleRequest {
 struct GuiSettingsResponse {
     template: String,
     exclusions: Vec<String>,
+    dedupe_same_maker: bool,
     backup_originals: bool,
     raw_parent_if_missing: bool,
 }
@@ -68,6 +69,8 @@ struct GuiSettingsResponse {
 struct SaveGuiSettingsRequest {
     template: String,
     exclusions: Vec<String>,
+    #[serde(default = "default_true")]
+    dedupe_same_maker: bool,
     #[serde(default)]
     backup_originals: bool,
     #[serde(default)]
@@ -95,7 +98,7 @@ fn generate_plan_cmd(request: PlanRequest) -> Result<RenamePlan, String> {
         recursive: request.recursive,
         include_hidden: request.include_hidden,
         template: request.template,
-        dedupe_same_maker: request.dedupe_same_make,
+        dedupe_same_maker: request.dedupe_same_maker,
         exclusions: request.exclusions,
         max_filename_len: request.max_filename_len.unwrap_or(240),
     };
@@ -125,7 +128,7 @@ fn validate_template_cmd(template: String) -> Result<(), String> {
 fn render_sample_cmd(request: SampleRequest) -> Result<String, String> {
     render_preview_sample(
         &request.template,
-        request.dedupe_same_make,
+        request.dedupe_same_maker,
         &request.exclusions,
         &request.metadata,
         &request.extension_with_dot,
@@ -142,7 +145,7 @@ fn render_fixed_sample_cmd(
     let metadata = fixed_sample_metadata(state.launched_at_utc.with_timezone(&Local));
     render_preview_sample(
         &request.template,
-        request.dedupe_same_make,
+        request.dedupe_same_maker,
         &request.exclusions,
         &metadata,
         ".JPG",
@@ -157,6 +160,7 @@ fn load_gui_settings_cmd() -> Result<GuiSettingsResponse, String> {
     Ok(GuiSettingsResponse {
         template: config.template,
         exclusions: config.exclude_strings,
+        dedupe_same_maker: config.dedupe_same_maker,
         backup_originals: config.backup_originals,
         raw_parent_if_missing: config.raw_parent_if_missing,
     })
@@ -167,6 +171,7 @@ fn save_gui_settings_cmd(request: SaveGuiSettingsRequest) -> Result<(), String> 
     let mut config = load_config().unwrap_or_else(|_| AppConfig::default());
     config.template = request.template;
     config.exclude_strings = request.exclusions;
+    config.dedupe_same_maker = request.dedupe_same_maker;
     config.backup_originals = request.backup_originals;
     config.raw_parent_if_missing = request.raw_parent_if_missing;
     save_config(&config).map_err(|err| err.to_string())

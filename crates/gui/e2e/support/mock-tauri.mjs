@@ -4,6 +4,7 @@ export function installTauriMock(options = {}) {
       options.settings?.template ||
       "{year}{month}{day}_{hour}{minute}{second}_{camera_maker}_{camera_model}_{lens_maker}_{lens_model}_{film_sim}_{orig_name}",
     exclusions: Array.isArray(options.settings?.exclusions) ? options.settings.exclusions : ["-NR"],
+    dedupeSameMaker: options.settings?.dedupeSameMaker !== false,
     backupOriginals: Boolean(options.settings?.backupOriginals),
     rawParentIfMissing: Boolean(options.settings?.rawParentIfMissing),
   };

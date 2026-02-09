@@ -9,10 +9,16 @@ use std::path::PathBuf;
 pub struct AppConfig {
     pub template: String,
     pub exclude_strings: Vec<String>,
+    #[serde(default = "default_true")]
+    pub dedupe_same_maker: bool,
     #[serde(default)]
     pub backup_originals: bool,
     #[serde(default)]
     pub raw_parent_if_missing: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for AppConfig {
@@ -20,6 +26,7 @@ impl Default for AppConfig {
         Self {
             template: DEFAULT_TEMPLATE.to_string(),
             exclude_strings: Vec::new(),
+            dedupe_same_maker: true,
             backup_originals: false,
             raw_parent_if_missing: false,
         }
@@ -89,6 +96,7 @@ mod tests {
         let cfg = AppConfig::default();
         assert_eq!(cfg.template, DEFAULT_TEMPLATE);
         assert!(cfg.exclude_strings.is_empty());
+        assert!(cfg.dedupe_same_maker);
         assert!(!cfg.backup_originals);
         assert!(!cfg.raw_parent_if_missing);
     }
@@ -106,6 +114,7 @@ exclude_strings = ["-NR"]
         let cfg: AppConfig = toml::from_str(raw).expect("legacy config should deserialize");
         assert_eq!(cfg.template, "{orig_name}");
         assert_eq!(cfg.exclude_strings, vec!["-NR"]);
+        assert!(cfg.dedupe_same_maker);
         assert!(!cfg.backup_originals);
         assert!(!cfg.raw_parent_if_missing);
     }
