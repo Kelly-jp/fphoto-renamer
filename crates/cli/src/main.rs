@@ -137,10 +137,10 @@ fn print_table(plan: &fphoto_renamer_core::RenamePlan) {
     println!("元ファイル -> 新ファイル (source)");
     for candidate in &plan.candidates {
         println!(
-            "{} -> {} ({:?})",
+            "{} -> {} ({})",
             candidate.original_path.display(),
             candidate.target_path.display(),
-            candidate.metadata_source
+            candidate.source_label
         );
     }
 

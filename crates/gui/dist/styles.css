@@ -335,6 +335,13 @@ button:disabled {
   color: #c6d9ea;
   word-break: break-all;
   line-height: 1.5;
+  display: grid;
+  gap: 1px;
+}
+
+.convert-log-target-line {
+  padding-left: 14px;
+  color: #a9c0d6;
 }
 
 .convert-log li.empty {

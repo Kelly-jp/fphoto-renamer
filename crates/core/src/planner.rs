@@ -51,9 +51,15 @@ pub struct RenameCandidate {
     pub original_path: PathBuf,
     pub target_path: PathBuf,
     pub metadata_source: MetadataSource,
+    #[serde(default = "default_source_label")]
+    pub source_label: String,
     pub metadata: PhotoMetadata,
     pub rendered_base: String,
     pub changed: bool,
+}
+
+fn default_source_label() -> String {
+    "jpg".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -79,8 +85,15 @@ pub struct RenamePlan {
 struct PreparedCandidate {
     original_path: PathBuf,
     metadata: PhotoMetadata,
+    source_label: String,
     rendered_base: String,
     extension: String,
+}
+
+#[derive(Debug)]
+struct ResolvedMetadata {
+    metadata: PhotoMetadata,
+    source_label: String,
 }
 
 pub fn generate_plan(options: &PlanOptions) -> Result<RenamePlan> {
@@ -144,6 +157,7 @@ pub fn generate_plan(options: &PlanOptions) -> Result<RenamePlan> {
             original_path: prepared.original_path,
             target_path: target,
             metadata_source: prepared.metadata.source,
+            source_label: prepared.source_label,
             metadata: prepared.metadata,
             rendered_base: prepared.rendered_base,
             changed,
@@ -170,8 +184,8 @@ fn prepare_candidate(
     max_filename_len: usize,
     jpg_path: &Path,
 ) -> Result<PreparedCandidate> {
-    let metadata = resolve_metadata(jpg_root, raw_root, raw_match_index, jpg_path, recursive)?;
-    let rendered = render_template_with_options(parts, &metadata, dedupe_same_maker);
+    let resolved = resolve_metadata(jpg_root, raw_root, raw_match_index, jpg_path, recursive)?;
+    let rendered = render_template_with_options(parts, &resolved.metadata, dedupe_same_maker);
     let excluded = apply_exclusions(rendered, exclusions);
     let normalized_spaces = normalize_spaces_to_underscore(&excluded);
     let cleaned = cleanup_filename(&normalized_spaces);
@@ -185,7 +199,8 @@ fn prepare_candidate(
 
     Ok(PreparedCandidate {
         original_path: jpg_path.to_path_buf(),
-        metadata,
+        metadata: resolved.metadata,
+        source_label: resolved.source_label,
         rendered_base,
         extension,
     })
@@ -284,7 +299,7 @@ fn resolve_metadata(
     raw_match_index: Option<&RawMatchIndex>,
     jpg_path: &Path,
     recursive: bool,
-) -> Result<PhotoMetadata> {
+) -> Result<ResolvedMetadata> {
     let fallback_date = file_modified_to_local(jpg_path).unwrap_or_else(Local::now);
     let original_name = jpg_path
         .file_stem()
@@ -341,13 +356,17 @@ fn resolve_metadata(
                     } else {
                         xmp_meta
                     };
-                    return Ok(to_photo_metadata(
+                    let metadata = to_photo_metadata(
                         merged,
                         source,
                         fallback_date,
                         original_name,
                         jpg_path,
-                    ));
+                    );
+                    return Ok(ResolvedMetadata {
+                        source_label: metadata_source_label(metadata.source, raw_path.as_deref()),
+                        metadata,
+                    });
                 }
                 Err(_) => {
                     if let Some(raw) = load_raw_exif_meta() {
@@ -357,13 +376,20 @@ fn resolve_metadata(
                         } else {
                             raw
                         };
-                        return Ok(to_photo_metadata(
+                        let metadata = to_photo_metadata(
                             merged,
                             MetadataSource::RawExif,
                             fallback_date,
                             original_name,
                             jpg_path,
-                        ));
+                        );
+                        return Ok(ResolvedMetadata {
+                            source_label: metadata_source_label(
+                                metadata.source,
+                                raw_path.as_deref(),
+                            ),
+                            metadata,
+                        });
                     }
                 }
             }
@@ -376,25 +402,45 @@ fn resolve_metadata(
             } else {
                 raw
             };
-            return Ok(to_photo_metadata(
+            let metadata = to_photo_metadata(
                 merged,
                 MetadataSource::RawExif,
                 fallback_date,
                 original_name,
                 jpg_path,
-            ));
+            );
+            return Ok(ResolvedMetadata {
+                source_label: metadata_source_label(metadata.source, raw_path.as_deref()),
+                metadata,
+            });
         }
     }
 
     load_jpg_exif_meta();
     let jpg_meta = jpg_exif_meta_cache.unwrap_or_default();
-    Ok(to_photo_metadata(
+    let metadata = to_photo_metadata(
         jpg_meta,
         MetadataSource::JpgExif,
         fallback_date,
         original_name,
         jpg_path,
-    ))
+    );
+    Ok(ResolvedMetadata {
+        source_label: metadata_source_label(metadata.source, None),
+        metadata,
+    })
+}
+
+fn metadata_source_label(source: MetadataSource, raw_path: Option<&Path>) -> String {
+    match source {
+        MetadataSource::Xmp | MetadataSource::XmpAndRawExif => "xmp".to_string(),
+        MetadataSource::RawExif => raw_path
+            .and_then(|path| path.extension().and_then(|v| v.to_str()))
+            .map(|ext| ext.trim().to_ascii_lowercase())
+            .filter(|ext| !ext.is_empty())
+            .unwrap_or_else(|| "raw".to_string()),
+        MetadataSource::JpgExif | MetadataSource::FallbackFileModified => "jpg".to_string(),
+    }
 }
 
 fn metadata_has_missing_fields(meta: &PartialMetadata) -> bool {
@@ -513,9 +559,10 @@ fn file_modified_to_local(path: &Path) -> Option<DateTime<Local>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{generate_plan, merge_with_jpg_fallback, PlanOptions};
+    use super::{generate_plan, merge_with_jpg_fallback, metadata_source_label, PlanOptions};
     use crate::metadata::{MetadataSource, PartialMetadata};
     use std::fs;
+    use std::path::PathBuf;
     use tempfile::tempdir;
 
     #[test]
@@ -600,6 +647,7 @@ mod tests {
         assert_eq!(plan.candidates.len(), 1);
         let c = &plan.candidates[0];
         assert_eq!(c.metadata_source, MetadataSource::Xmp);
+        assert_eq!(c.source_label, "xmp");
         assert_eq!(c.metadata.camera_make.as_deref(), Some("FUJIFILM"));
     }
 
@@ -636,6 +684,27 @@ mod tests {
         assert_eq!(plan.candidates.len(), 1);
         let c = &plan.candidates[0];
         assert_eq!(c.metadata_source, MetadataSource::Xmp);
+        assert_eq!(c.source_label, "xmp");
         assert_eq!(c.metadata.camera_make.as_deref(), Some("FUJIFILM"));
+    }
+
+    #[test]
+    fn metadata_source_label_uses_raw_extension_for_raw_exif() {
+        let raw_path = PathBuf::from("/tmp/session/DSC00001.RAF");
+        let label = metadata_source_label(MetadataSource::RawExif, Some(&raw_path));
+        assert_eq!(label, "raf");
+    }
+
+    #[test]
+    fn metadata_source_label_returns_xmp_for_combined_source() {
+        let raw_path = PathBuf::from("/tmp/session/DSC00001.DNG");
+        let label = metadata_source_label(MetadataSource::XmpAndRawExif, Some(&raw_path));
+        assert_eq!(label, "xmp");
+    }
+
+    #[test]
+    fn metadata_source_label_returns_jpg_for_fallback_source() {
+        let label = metadata_source_label(MetadataSource::FallbackFileModified, None);
+        assert_eq!(label, "jpg");
     }
 }

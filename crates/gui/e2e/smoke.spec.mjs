@@ -83,12 +83,31 @@ test.describe("Browser UI smoke", () => {
 
     await page.click("#applyBtn");
     await expect(page.locator("#actionMessage")).toContainText("変換完了: 1件");
-    await expect(page.locator("#convertLog")).toContainText("✅ IMG_0001.JPG → 20260208091530_IMG_0001.JPG");
-    await expect(page.locator("#convertLog")).toContainText("⏭️ IMG_0002.JPG → IMG_0002.JPG");
+    await expect(page.locator("#convertLog")).toContainText(/✅ IMG_0001\.JPG\s*→ 20260208091530_IMG_0001\.JPG/);
+    await expect(page.locator("#convertLog")).toContainText(/⏭️ IMG_0002\.JPG\s*→ IMG_0002\.JPG/);
 
     const invokedCommands = (await getMockCalls(page)).map((call) => call.cmd);
     expect(invokedCommands).toContain("generate_plan_cmd");
     expect(invokedCommands).toContain("apply_plan_cmd");
+  });
+
+  test("変換ログに情報源ラベルを表示する", async ({ page }) => {
+    await openWithMock(page, {
+      planCandidates: [
+        { originalName: "IMG_1001.JPG", targetName: "RENAMED_1001.JPG", changed: true, sourceLabel: "xmp" },
+        { originalName: "IMG_1002.JPG", targetName: "RENAMED_1002.JPG", changed: true, sourceLabel: "raf" },
+        { originalName: "IMG_1003.JPG", targetName: "RENAMED_1003.JPG", changed: true, sourceLabel: "dng" },
+        { originalName: "IMG_1004.JPG", targetName: "IMG_1004.JPG", changed: false, sourceLabel: "jpg" },
+      ],
+    });
+
+    await page.fill("#jpgInput", "/tmp/mock-jpg");
+    await page.click("#applyBtn");
+
+    await expect(page.locator("#convertLog")).toContainText(/✅ IMG_1001\.JPG\s*→ RENAMED_1001\.JPG \(xmp\)/);
+    await expect(page.locator("#convertLog")).toContainText(/✅ IMG_1002\.JPG\s*→ RENAMED_1002\.JPG \(raf\)/);
+    await expect(page.locator("#convertLog")).toContainText(/✅ IMG_1003\.JPG\s*→ RENAMED_1003\.JPG \(dng\)/);
+    await expect(page.locator("#convertLog")).toContainText(/⏭️ IMG_1004\.JPG\s*→ IMG_1004\.JPG \(jpg\)/);
   });
 
   test("変換中はボタンやテキスト入力を無効化する", async ({ page }) => {
@@ -157,7 +176,7 @@ test.describe("Browser UI smoke", () => {
     await page.click("#applyBtn");
 
     await expect(page.locator("#actionMessage")).toContainText("変換失敗: 書き込み失敗");
-    await expect(page.locator("#convertLog")).toContainText("❌ IMG_0001.JPG → 20260208091530_IMG_0001.JPG");
+    await expect(page.locator("#convertLog")).toContainText(/❌ IMG_0001\.JPG\s*→ 20260208091530_IMG_0001\.JPG/);
   });
 
   test("undo実行で元に戻しメッセージとログを表示する", async ({ page }) => {
@@ -171,7 +190,7 @@ test.describe("Browser UI smoke", () => {
 
     await page.click("#undoBtn");
     await expect(page.locator("#actionMessage")).toContainText("元に戻し完了: 1件");
-    await expect(page.locator("#convertLog")).toContainText("↩️ 20260208091530_IMG_0001.JPG → IMG_0001.JPG");
+    await expect(page.locator("#convertLog")).toContainText(/↩️ 20260208091530_IMG_0001\.JPG\s*→ IMG_0001\.JPG/);
   });
 
   test("フォルダ選択ボタンでJPG入力へ反映される", async ({ page }) => {

@@ -297,11 +297,41 @@ function renderConvertLogEntries(entries) {
   }
 }
 
+function normalizeLogSourceLabel(label) {
+  if (typeof label !== "string") {
+    return "";
+  }
+  const normalized = label.trim().toLowerCase();
+  return normalized;
+}
+
+function inferLogSourceFromMetadataSource(metadataSource) {
+  switch (metadataSource) {
+    case "Xmp":
+    case "XmpAndRawExif":
+      return "xmp";
+    case "RawExif":
+      return "raw";
+    case "JpgExif":
+    case "FallbackFileModified":
+    default:
+      return "jpg";
+  }
+}
+
+function resolveLogSourceLabel(row) {
+  return (
+    normalizeLogSourceLabel(row?.source_label) ||
+    inferLogSourceFromMetadataSource(row?.metadata_source)
+  );
+}
+
 function buildLogEntriesFromPlan(plan, changedEmoji) {
   return plan.candidates.map((row) => ({
     emoji: row.changed ? changedEmoji : "⏭️",
     original: basename(row.original_path),
     target: basename(row.target_path),
+    source: resolveLogSourceLabel(row),
   }));
 }
 
@@ -325,7 +355,14 @@ function renderEmptyConvertLog() {
 
 function appendSingleConvertLogEntry(entry) {
   const li = document.createElement("li");
-  li.textContent = `${entry.emoji} ${entry.original} → ${entry.target}`;
+  const sourceSuffix = entry.source ? ` (${entry.source})` : "";
+  const originalLine = document.createElement("span");
+  originalLine.textContent = `${entry.emoji} ${entry.original}`;
+  const targetLine = document.createElement("span");
+  targetLine.className = "convert-log-target-line";
+  targetLine.textContent = `→ ${entry.target}${sourceSuffix}`;
+  li.appendChild(originalLine);
+  li.appendChild(targetLine);
   el.convertLog.appendChild(li);
 }
 

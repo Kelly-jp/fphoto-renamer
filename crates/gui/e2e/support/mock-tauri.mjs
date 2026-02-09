@@ -36,10 +36,16 @@ export function installTauriMock(options = {}) {
   };
   const toPlanCandidate = (row, basePath, index) => {
     const normalizedBasePath = normalizeFolder(basePath);
+    const sourceLabelRaw = row?.source_label ?? row?.sourceLabel;
+    const sourceLabel =
+      typeof sourceLabelRaw === "string" && sourceLabelRaw.trim().length > 0
+        ? sourceLabelRaw.trim().toLowerCase()
+        : "jpg";
     if (typeof row?.original_path === "string" && typeof row?.target_path === "string") {
       return {
         original_path: row.original_path,
         target_path: row.target_path,
+        source_label: sourceLabel,
         changed: row.changed !== false,
       };
     }
@@ -50,6 +56,7 @@ export function installTauriMock(options = {}) {
     return {
       original_path: `${normalizedBasePath}/${originalName}`,
       target_path: `${normalizedBasePath}/${targetName}`,
+      source_label: sourceLabel,
       changed: row?.changed !== false,
     };
   };

@@ -371,6 +371,7 @@ mod tests {
                 original_path: original.clone(),
                 target_path: target,
                 metadata_source: MetadataSource::JpgExif,
+                source_label: "jpg".to_string(),
                 metadata: sample_metadata(original),
                 rendered_base: "IMG_0001".to_string(),
                 changed: false,
