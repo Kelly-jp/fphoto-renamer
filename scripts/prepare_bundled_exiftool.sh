@@ -69,6 +69,12 @@ cleanup_temp_dir() {
   rm -rf "$dir_path" 2>/dev/null || true
 }
 
+first_match_path() {
+  local search_root="$1"
+  shift
+  find "$search_root" "$@" -print -quit
+}
+
 extract_zip_archive() {
   local archive_path="$1"
   local dest_dir="$2"
@@ -101,7 +107,9 @@ prepare_unix_bundle() {
   tar -xzf "$work_dir/exiftool.tar.gz" -C "$work_dir"
 
   local extracted_dir
-  extracted_dir="$(find "$work_dir" -mindepth 1 -maxdepth 1 -type d -name 'Image-ExifTool-*' | head -n 1)"
+  extracted_dir="$(
+    first_match_path "$work_dir" -mindepth 1 -maxdepth 1 -type d -name 'Image-ExifTool-*'
+  )"
   if [[ -z "$extracted_dir" ]]; then
     echo "failed to locate extracted ExifTool directory for ${os_name}" >&2
     cleanup_temp_dir "$work_dir"
@@ -140,7 +148,9 @@ prepare_windows_bundle() {
   extract_zip_archive "$work_dir/exiftool.zip" "$work_dir"
 
   local source_file
-  source_file="$(find "$work_dir" -type f \( -name 'exiftool(-k).exe' -o -name 'exiftool.exe' \) | head -n 1)"
+  source_file="$(
+    first_match_path "$work_dir" -type f \( -name 'exiftool(-k).exe' -o -name 'exiftool.exe' \)
+  )"
   if [[ -z "$source_file" ]]; then
     echo "failed to locate Windows ExifTool executable in archive" >&2
     cleanup_temp_dir "$work_dir"
@@ -148,7 +158,7 @@ prepare_windows_bundle() {
   fi
 
   local runtime_dir
-  runtime_dir="$(find "$work_dir" -type d -name 'exiftool_files' | head -n 1)"
+  runtime_dir="$(first_match_path "$work_dir" -type d -name 'exiftool_files')"
   if [[ -z "$runtime_dir" ]]; then
     echo "failed to locate Windows ExifTool runtime directory in archive" >&2
     cleanup_temp_dir "$work_dir"
