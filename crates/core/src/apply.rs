@@ -1,4 +1,4 @@
-use crate::config::app_paths;
+use crate::config::{app_paths, AppPaths};
 use crate::planner::{RenameCandidate, RenamePlan};
 use anyhow::{bail, Context, Result};
 use rayon::prelude::*;
@@ -54,6 +54,15 @@ pub fn apply_plan(plan: &RenamePlan) -> Result<ApplyResult> {
 }
 
 pub fn apply_plan_with_options(plan: &RenamePlan, options: &ApplyOptions) -> Result<ApplyResult> {
+    let paths = app_paths()?;
+    apply_plan_with_options_with_paths(plan, options, &paths)
+}
+
+fn apply_plan_with_options_with_paths(
+    plan: &RenamePlan,
+    options: &ApplyOptions,
+    paths: &AppPaths,
+) -> Result<ApplyResult> {
     let candidates: Vec<&RenameCandidate> = plan.candidates.iter().filter(|c| c.changed).collect();
     if candidates.is_empty() {
         return Ok(ApplyResult {
@@ -115,7 +124,16 @@ pub fn apply_plan_with_options(plan: &RenamePlan, options: &ApplyOptions) -> Res
         });
     }
 
-    persist_undo(&operations, plan, options, &backup_paths)?;
+    if let Err(persist_err) = persist_undo(&operations, plan, options, &backup_paths, paths) {
+        let rollback_result = rollback_after_undo_persist_failure(&operations);
+        let backup_cleanup_result =
+            cleanup_created_backups_after_persist_failure(&plan.jpg_root, &backup_paths);
+        return Err(compose_persist_failure_error(
+            persist_err,
+            rollback_result,
+            backup_cleanup_result,
+        ));
+    }
 
     Ok(ApplyResult {
         applied: operations.len(),
@@ -228,10 +246,68 @@ fn rollback_after_final_rename_failure(staged: &[StagedRename], finalized: usize
     rollback_staged_to_original_paths(staged)
 }
 
+fn rollback_after_undo_persist_failure(operations: &[RenameOperation]) -> Result<()> {
+    for operation in operations.iter().rev() {
+        if !operation.to.exists() {
+            continue;
+        }
+        fs::rename(&operation.to, &operation.from).with_context(|| {
+            format!(
+                "取り消しログ保存失敗後のロールバックに失敗しました: {} -> {}",
+                operation.to.display(),
+                operation.from.display()
+            )
+        })?;
+    }
+    Ok(())
+}
+
+fn cleanup_created_backups_after_persist_failure(
+    jpg_root: &Path,
+    backup_paths: &[PathBuf],
+) -> Result<()> {
+    if backup_paths.is_empty() {
+        return Ok(());
+    }
+
+    let validated = ValidatedUndoLog {
+        operations: Vec::new(),
+        backup_root: Some(jpg_root.join("backup")),
+        backup_paths: backup_paths.to_vec(),
+    };
+    cleanup_backup_if_needed(&validated)
+}
+
+fn compose_persist_failure_error(
+    persist_err: anyhow::Error,
+    rollback_result: Result<()>,
+    backup_cleanup_result: Result<()>,
+) -> anyhow::Error {
+    match (rollback_result, backup_cleanup_result) {
+        (Ok(()), Ok(())) => persist_err
+            .context("取り消しログの保存に失敗したため、適用した変更をロールバックしました"),
+        (Ok(()), Err(backup_cleanup_err)) => persist_err.context(format!(
+            "取り消しログの保存に失敗したため、適用した変更をロールバックしましたがバックアップ掃除に失敗しました: {backup_cleanup_err}"
+        )),
+        (Err(rollback_err), Ok(())) => persist_err.context(format!(
+            "取り消しログの保存に失敗し、適用済み変更のロールバックにも失敗しました: {rollback_err}"
+        )),
+        (Err(rollback_err), Err(backup_cleanup_err)) => persist_err.context(format!(
+            "取り消しログの保存に失敗し、適用済み変更のロールバックにも失敗しました: {rollback_err}; バックアップ掃除にも失敗しました: {backup_cleanup_err}"
+        )),
+    }
+}
+
 fn backup_original_files(
     plan: &RenamePlan,
     candidates: &[&RenameCandidate],
 ) -> Result<Vec<PathBuf>> {
+    let jpg_root_canonical = fs::canonicalize(&plan.jpg_root).with_context(|| {
+        format!(
+            "JPGルートを解決できませんでした: {}",
+            plan.jpg_root.display()
+        )
+    })?;
     let backup_root = plan.jpg_root.join("backup");
     fs::create_dir_all(&backup_root).with_context(|| {
         format!(
@@ -239,6 +315,18 @@ fn backup_original_files(
             backup_root.display()
         )
     })?;
+    let backup_root_canonical = fs::canonicalize(&backup_root).with_context(|| {
+        format!(
+            "バックアップフォルダを解決できませんでした: {}",
+            backup_root.display()
+        )
+    })?;
+    if !backup_root_canonical.starts_with(&jpg_root_canonical) {
+        bail!(
+            "バックアップフォルダがJPGフォルダ外を指しています: {}",
+            backup_root.display()
+        );
+    }
 
     let mut reserved_paths = HashSet::<PathBuf>::new();
     let mut backup_jobs = Vec::<(PathBuf, PathBuf)>::with_capacity(candidates.len());
@@ -430,12 +518,19 @@ fn validate_undo_log(log: &UndoLog) -> Result<ValidatedUndoLog> {
 
     let backup_root = jpg_root.join("backup");
     let backup_root_canonical = if backup_root.exists() {
-        Some(fs::canonicalize(&backup_root).with_context(|| {
+        let canonical = fs::canonicalize(&backup_root).with_context(|| {
             format!(
                 "バックアップルートを解決できませんでした: {}",
                 backup_root.display()
             )
-        })?)
+        })?;
+        if !canonical.starts_with(&jpg_root) {
+            bail!(
+                "取り消しログのバックアップルートがJPGフォルダ外です: {}",
+                backup_root.display()
+            );
+        }
+        Some(canonical)
     } else {
         None
     };
@@ -509,8 +604,8 @@ fn persist_undo(
     plan: &RenamePlan,
     options: &ApplyOptions,
     backup_paths: &[PathBuf],
+    paths: &AppPaths,
 ) -> Result<()> {
-    let paths = app_paths()?;
     fs::create_dir_all(&paths.config_dir).with_context(|| {
         format!(
             "設定ディレクトリ作成に失敗しました: {}",
@@ -526,13 +621,52 @@ fn persist_undo(
     };
     let body =
         serde_json::to_string_pretty(&log).context("取り消しログのシリアライズに失敗しました")?;
-    fs::write(&paths.undo_path, body).with_context(|| {
+    write_file_atomically(&paths.undo_path, &body, "取り消しログ")?;
+    Ok(())
+}
+
+fn write_file_atomically(target_path: &Path, body: &str, label: &str) -> Result<()> {
+    let file_name = target_path
+        .file_name()
+        .and_then(|v| v.to_str())
+        .unwrap_or("state");
+    let temp_path = target_path.with_file_name(format!(".{file_name}.{}.tmp", std::process::id()));
+
+    fs::write(&temp_path, body).with_context(|| {
         format!(
-            "取り消しログ書き込みに失敗しました: {}",
-            paths.undo_path.display()
+            "{label}の一時ファイル書き込みに失敗しました: {}",
+            temp_path.display()
         )
     })?;
-    Ok(())
+
+    match fs::rename(&temp_path, target_path) {
+        Ok(()) => Ok(()),
+        Err(primary_rename_err) => {
+            if target_path.exists() {
+                fs::remove_file(target_path).with_context(|| {
+                    format!(
+                        "{label}の既存ファイル削除に失敗しました: {}",
+                        target_path.display()
+                    )
+                })?;
+                fs::rename(&temp_path, target_path).with_context(|| {
+                    format!(
+                        "{label}の置き換えに失敗しました: {} -> {}",
+                        temp_path.display(),
+                        target_path.display()
+                    )
+                })?;
+                return Ok(());
+            }
+
+            let _ = fs::remove_file(&temp_path);
+            Err(anyhow::Error::from(primary_rename_err).context(format!(
+                "{label}の置き換えに失敗しました: {} -> {}",
+                temp_path.display(),
+                target_path.display()
+            )))
+        }
+    }
 }
 
 fn cleanup_backup_if_needed(log: &ValidatedUndoLog) -> Result<()> {
@@ -615,15 +749,18 @@ fn temp_path_for(original_path: &Path, index: usize) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_plan_with_options, cleanup_backup_if_needed, resolve_backup_path,
-        resolve_backup_path_with_reserved, restore_operations, unique_backup_path,
-        validate_undo_log, ApplyOptions, UndoLog,
+        apply_plan_with_options, apply_plan_with_options_with_paths, backup_original_files,
+        cleanup_backup_if_needed, resolve_backup_path, resolve_backup_path_with_reserved,
+        restore_operations, unique_backup_path, validate_undo_log, ApplyOptions, UndoLog,
     };
+    use crate::config::AppPaths;
     use crate::metadata::{MetadataSource, PhotoMetadata};
     use crate::planner::{RenameCandidate, RenamePlan, RenameStats};
     use chrono::Local;
     use std::collections::HashSet;
     use std::fs;
+    #[cfg(unix)]
+    use std::os::unix::fs as unix_fs;
     use std::path::PathBuf;
     use tempfile::tempdir;
 
@@ -812,6 +949,43 @@ mod tests {
         assert_eq!(backup_b, backup_root.join("IMG_0001_001.JPG"));
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn backup_original_files_rejects_backup_symlink_outside_jpg_root() {
+        let temp = tempdir().expect("tempdir");
+        let jpg_root = temp.path().join("jpg");
+        let outside_root = temp.path().join("outside");
+        fs::create_dir_all(&jpg_root).expect("create jpg root");
+        fs::create_dir_all(&outside_root).expect("create outside root");
+
+        let original = jpg_root.join("IMG_0001.JPG");
+        fs::write(&original, b"x").expect("write original");
+        let backup_link = jpg_root.join("backup");
+        unix_fs::symlink(&outside_root, &backup_link).expect("create backup symlink");
+
+        let candidate = RenameCandidate {
+            original_path: original.clone(),
+            target_path: jpg_root.join("IMG_0001_NEW.JPG"),
+            metadata_source: MetadataSource::JpgExif,
+            source_label: "jpg".to_string(),
+            metadata: sample_metadata(original),
+            rendered_base: "IMG_0001_NEW".to_string(),
+            changed: true,
+        };
+        let plan = RenamePlan {
+            jpg_root,
+            template: "{orig_name}".to_string(),
+            exclusions: Vec::new(),
+            candidates: vec![candidate.clone()],
+            stats: RenameStats::default(),
+        };
+
+        let err = backup_original_files(&plan, &[&candidate]).expect_err("symlink root must fail");
+        assert!(err
+            .to_string()
+            .contains("バックアップフォルダがJPGフォルダ外を指しています"));
+    }
+
     #[test]
     fn apply_plan_rolls_back_when_final_rename_fails_midway() {
         let temp = tempdir().expect("tempdir");
@@ -873,6 +1047,61 @@ mod tests {
                     .starts_with(".fphoto_tmp_")
             });
         assert!(!has_temp, "temporary files should not remain");
+    }
+
+    #[test]
+    fn apply_plan_rolls_back_when_undo_log_persist_fails() {
+        let temp = tempdir().expect("tempdir");
+        let jpg_root = temp.path().join("jpg");
+        fs::create_dir_all(&jpg_root).expect("create jpg root");
+
+        let original = jpg_root.join("IMG_0001.JPG");
+        let renamed = jpg_root.join("RENAMED_0001.JPG");
+        fs::write(&original, b"x").expect("write original");
+
+        let plan = RenamePlan {
+            jpg_root: jpg_root.clone(),
+            template: "{orig_name}".to_string(),
+            exclusions: Vec::new(),
+            candidates: vec![RenameCandidate {
+                original_path: original.clone(),
+                target_path: renamed.clone(),
+                metadata_source: MetadataSource::JpgExif,
+                source_label: "jpg".to_string(),
+                metadata: sample_metadata(original.clone()),
+                rendered_base: "RENAMED_0001".to_string(),
+                changed: true,
+            }],
+            stats: RenameStats::default(),
+        };
+
+        let blocked_config_dir = temp.path().join("blocked-config");
+        fs::write(&blocked_config_dir, b"not-a-directory").expect("create blocked config path");
+        let blocked_paths = AppPaths {
+            config_dir: blocked_config_dir.clone(),
+            config_path: blocked_config_dir.join("config.toml"),
+            undo_path: blocked_config_dir.join("undo-last.json"),
+        };
+
+        let err = apply_plan_with_options_with_paths(
+            &plan,
+            &ApplyOptions {
+                backup_originals: true,
+            },
+            &blocked_paths,
+        )
+        .expect_err("persist should fail");
+
+        assert!(
+            err.to_string().contains("取り消しログ"),
+            "error should include undo persistence context: {err}"
+        );
+        assert!(original.exists(), "original should be restored");
+        assert!(!renamed.exists(), "renamed file should be rolled back");
+        assert!(
+            !jpg_root.join("backup").exists(),
+            "backup directory should be cleaned after rollback"
+        );
     }
 
     #[test]

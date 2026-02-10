@@ -94,13 +94,14 @@ fn configured_exiftool_path() -> Option<PathBuf> {
 
 fn read_exif_metadata_with_exiftool(path: &Path) -> Result<PartialMetadata> {
     let exiftool_mutex = exiftool_instance().ok_or_else(|| anyhow!("ExifTool が利用できません"))?;
-    let exiftool = exiftool_mutex
-        .lock()
-        .map_err(|_| anyhow!("ExifTool のロック取得に失敗しました"))?;
-
-    let json = exiftool
-        .json(path, EXIFTOOL_ARGS)
-        .map_err(|err| anyhow!("ExifTool 取得失敗: {err}"))?;
+    let json = {
+        let exiftool = exiftool_mutex
+            .lock()
+            .map_err(|_| anyhow!("ExifTool のロック取得に失敗しました"))?;
+        exiftool
+            .json(path, EXIFTOOL_ARGS)
+            .map_err(|err| anyhow!("ExifTool 取得失敗: {err}"))?
+    };
 
     let date = pick_json_string(
         &json,

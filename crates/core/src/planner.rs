@@ -96,6 +96,17 @@ struct ResolvedMetadata {
     source_label: String,
 }
 
+struct PrepareContext<'a> {
+    jpg_root: &'a Path,
+    raw_root: Option<&'a Path>,
+    raw_match_index: Option<&'a RawMatchIndex>,
+    recursive: bool,
+    parts: &'a [TemplatePart],
+    dedupe_same_maker: bool,
+    exclusions: &'a [String],
+    max_filename_len: usize,
+}
+
 pub fn generate_plan(options: &PlanOptions) -> Result<RenamePlan> {
     if !options.jpg_input.exists() {
         anyhow::bail!("JPGフォルダが存在しません: {}", options.jpg_input.display());
@@ -125,21 +136,19 @@ pub fn generate_plan(options: &PlanOptions) -> Result<RenamePlan> {
         &mut stats,
     )?;
 
+    let prepare_context = PrepareContext {
+        jpg_root: &options.jpg_input,
+        raw_root: effective_raw_input.as_deref(),
+        raw_match_index: raw_match_index.as_ref(),
+        recursive: options.recursive,
+        parts: &parts,
+        dedupe_same_maker: options.dedupe_same_maker,
+        exclusions: &options.exclusions,
+        max_filename_len: options.max_filename_len,
+    };
     let prepared_results: Vec<Result<PreparedCandidate>> = jpg_files
         .par_iter()
-        .map(|jpg_path| {
-            prepare_candidate(
-                &options.jpg_input,
-                effective_raw_input.as_deref(),
-                raw_match_index.as_ref(),
-                options.recursive,
-                &parts,
-                options.dedupe_same_maker,
-                &options.exclusions,
-                options.max_filename_len,
-                jpg_path,
-            )
-        })
+        .map(|jpg_path| prepare_candidate(&prepare_context, jpg_path))
         .collect();
 
     let mut prepared = Vec::with_capacity(prepared_results.len());
@@ -184,20 +193,17 @@ pub fn generate_plan(options: &PlanOptions) -> Result<RenamePlan> {
     })
 }
 
-fn prepare_candidate(
-    jpg_root: &Path,
-    raw_root: Option<&Path>,
-    raw_match_index: Option<&RawMatchIndex>,
-    recursive: bool,
-    parts: &[TemplatePart],
-    dedupe_same_maker: bool,
-    exclusions: &[String],
-    max_filename_len: usize,
-    jpg_path: &Path,
-) -> Result<PreparedCandidate> {
-    let resolved = resolve_metadata(jpg_root, raw_root, raw_match_index, jpg_path, recursive)?;
-    let rendered = render_template_with_options(parts, &resolved.metadata, dedupe_same_maker);
-    let excluded = apply_exclusions(rendered, exclusions);
+fn prepare_candidate(context: &PrepareContext<'_>, jpg_path: &Path) -> Result<PreparedCandidate> {
+    let resolved = resolve_metadata(
+        context.jpg_root,
+        context.raw_root,
+        context.raw_match_index,
+        jpg_path,
+        context.recursive,
+    )?;
+    let rendered =
+        render_template_with_options(context.parts, &resolved.metadata, context.dedupe_same_maker);
+    let excluded = apply_exclusions(rendered, context.exclusions);
     let normalized_spaces = normalize_spaces_to_underscore(&excluded);
     let cleaned = cleanup_filename(&normalized_spaces);
     let sanitized = sanitize_filename(&cleaned);
@@ -206,7 +212,8 @@ fn prepare_candidate(
         .extension()
         .map(|v| format!(".{}", v.to_string_lossy()))
         .unwrap_or_default();
-    let rendered_base = truncate_filename_if_needed(&sanitized, &extension, max_filename_len);
+    let rendered_base =
+        truncate_filename_if_needed(&sanitized, &extension, context.max_filename_len);
 
     Ok(PreparedCandidate {
         original_path: jpg_path.to_path_buf(),
@@ -256,11 +263,16 @@ fn collect_jpg_files(
     let mut out = Vec::new();
 
     if recursive {
-        for entry in WalkDir::new(root).sort_by_file_name() {
+        let mut walker = WalkDir::new(root).sort_by_file_name().into_iter();
+        while let Some(entry) = walker.next() {
             let entry =
                 entry.with_context(|| format!("フォルダ走査に失敗しました: {}", root.display()))?;
             let path = entry.path();
             if path.is_dir() {
+                if entry.depth() > 0 && !include_hidden && is_hidden(path) {
+                    stats.skipped_hidden += 1;
+                    walker.skip_current_dir();
+                }
                 continue;
             }
             if is_hidden(path) && !include_hidden {
@@ -298,8 +310,9 @@ fn collect_jpg_files(
                 stats.skipped_non_jpg += 1;
             }
         }
-        out.sort();
     }
+
+    out.sort();
 
     Ok(out)
 }
@@ -805,6 +818,78 @@ mod tests {
         assert_eq!(c.metadata_source, MetadataSource::Xmp);
         assert_eq!(c.source_label, "xmp");
         assert_eq!(c.metadata.camera_make.as_deref(), Some("FUJIFILM"));
+    }
+
+    #[test]
+    fn generate_plan_non_recursive_returns_stable_sorted_order() {
+        let temp = tempdir().expect("tempdir");
+        let jpg_root = temp.path().join("jpg");
+        fs::create_dir_all(&jpg_root).expect("jpg root");
+        fs::write(jpg_root.join("B.JPG"), b"b").expect("write b");
+        fs::write(jpg_root.join("A.JPG"), b"a").expect("write a");
+
+        let plan = generate_plan(&PlanOptions {
+            jpg_input: jpg_root,
+            raw_input: None,
+            raw_from_jpg_parent_when_missing: false,
+            recursive: false,
+            include_hidden: false,
+            template: "{orig_name}".to_string(),
+            dedupe_same_maker: true,
+            exclusions: Vec::new(),
+            max_filename_len: 240,
+        })
+        .expect("plan generation should succeed");
+
+        assert_eq!(plan.candidates.len(), 2);
+        assert_eq!(
+            plan.candidates[0]
+                .original_path
+                .file_name()
+                .and_then(|v| v.to_str()),
+            Some("A.JPG")
+        );
+        assert_eq!(
+            plan.candidates[1]
+                .original_path
+                .file_name()
+                .and_then(|v| v.to_str()),
+            Some("B.JPG")
+        );
+    }
+
+    #[test]
+    fn generate_plan_recursive_skips_hidden_directories_when_disabled() {
+        let temp = tempdir().expect("tempdir");
+        let jpg_root = temp.path().join("jpg");
+        let hidden_dir = jpg_root.join(".hidden");
+        fs::create_dir_all(&hidden_dir).expect("hidden dir");
+        fs::write(jpg_root.join("VISIBLE.JPG"), b"visible").expect("visible jpg");
+        fs::write(hidden_dir.join("INSIDE.JPG"), b"hidden jpg").expect("hidden jpg");
+
+        let plan = generate_plan(&PlanOptions {
+            jpg_input: jpg_root,
+            raw_input: None,
+            raw_from_jpg_parent_when_missing: false,
+            recursive: true,
+            include_hidden: false,
+            template: "{orig_name}".to_string(),
+            dedupe_same_maker: true,
+            exclusions: Vec::new(),
+            max_filename_len: 240,
+        })
+        .expect("plan generation should succeed");
+
+        assert_eq!(plan.candidates.len(), 1);
+        assert_eq!(
+            plan.candidates[0]
+                .original_path
+                .file_name()
+                .and_then(|v| v.to_str()),
+            Some("VISIBLE.JPG")
+        );
+        assert_eq!(plan.stats.jpg_files, 1);
+        assert_eq!(plan.stats.skipped_hidden, 1);
     }
 
     #[test]

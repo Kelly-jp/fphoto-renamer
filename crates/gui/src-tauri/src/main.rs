@@ -366,22 +366,22 @@ fn load_about_icon() -> Option<tauri::image::Image<'static>> {
 fn resource_rel_path() -> &'static str {
     #[cfg(target_os = "windows")]
     {
-        return "resources/bin/windows/exiftool.exe";
+        "resources/bin/windows/exiftool.exe"
     }
 
     #[cfg(target_os = "macos")]
     {
-        return "resources/bin/macos/exiftool";
+        "resources/bin/macos/exiftool"
     }
 
     #[cfg(target_os = "linux")]
     {
-        return "resources/bin/linux/exiftool";
+        "resources/bin/linux/exiftool"
     }
 
     #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
     {
-        return "resources/bin/exiftool";
+        "resources/bin/exiftool"
     }
 }
 

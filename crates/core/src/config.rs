@@ -3,7 +3,7 @@ use anyhow::{Context, Result};
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
@@ -77,13 +77,52 @@ pub fn save_config(config: &AppConfig) -> Result<()> {
         )
     })?;
     let body = toml::to_string_pretty(config).context("設定のシリアライズに失敗しました")?;
-    fs::write(&paths.config_path, body).with_context(|| {
+    write_file_atomically(&paths.config_path, &body, "設定ファイル")?;
+    Ok(())
+}
+
+fn write_file_atomically(target_path: &Path, body: &str, label: &str) -> Result<()> {
+    let file_name = target_path
+        .file_name()
+        .and_then(|v| v.to_str())
+        .unwrap_or("config");
+    let temp_path = target_path.with_file_name(format!(".{file_name}.{}.tmp", std::process::id()));
+
+    fs::write(&temp_path, body).with_context(|| {
         format!(
-            "設定ファイルを書き込めませんでした: {}",
-            paths.config_path.display()
+            "{label}の一時ファイル書き込みに失敗しました: {}",
+            temp_path.display()
         )
     })?;
-    Ok(())
+
+    match fs::rename(&temp_path, target_path) {
+        Ok(()) => Ok(()),
+        Err(primary_rename_err) => {
+            if target_path.exists() {
+                fs::remove_file(target_path).with_context(|| {
+                    format!(
+                        "{label}の既存ファイル削除に失敗しました: {}",
+                        target_path.display()
+                    )
+                })?;
+                fs::rename(&temp_path, target_path).with_context(|| {
+                    format!(
+                        "{label}の置き換えに失敗しました: {} -> {}",
+                        temp_path.display(),
+                        target_path.display()
+                    )
+                })?;
+                return Ok(());
+            }
+
+            let _ = fs::remove_file(&temp_path);
+            Err(anyhow::Error::from(primary_rename_err).context(format!(
+                "{label}の置き換えに失敗しました: {} -> {}",
+                temp_path.display(),
+                target_path.display()
+            )))
+        }
+    }
 }
 
 #[cfg(test)]
