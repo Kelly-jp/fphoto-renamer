@@ -308,6 +308,14 @@ button:disabled {
   min-height: 0;
 }
 
+.action-message.is-error {
+  color: #dc2626;
+}
+
+.action-message.is-success {
+  color: #0f5132;
+}
+
 .log-card {
   flex: 1;
   min-height: 0;

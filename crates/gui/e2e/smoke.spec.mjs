@@ -6,6 +6,24 @@ async function openWithMock(page, options = {}) {
   await page.goto("/index.html");
 }
 
+async function openWithMockAndStrictCsp(page, options = {}) {
+  const strictCsp =
+    "default-src 'none'; script-src 'self'; script-src-attr 'none'; style-src 'self'; style-src-attr 'none'; connect-src 'self'; img-src 'self' data:; font-src 'self'; object-src 'none'; frame-src 'none'; child-src 'none'; worker-src 'none'; media-src 'none'; manifest-src 'self'; base-uri 'none'; form-action 'none'";
+
+  await page.addInitScript(installTauriMock, options);
+  await page.route("**/index.html", async (route) => {
+    const response = await route.fetch();
+    await route.fulfill({
+      response,
+      headers: {
+        ...response.headers(),
+        "content-security-policy": strictCsp,
+      },
+    });
+  });
+  await page.goto("/index.html");
+}
+
 async function getMockCalls(page, cmd = null) {
   return page.evaluate((targetCmd) => {
     const calls = Array.isArray(globalThis.__mockTauriCalls) ? globalThis.__mockTauriCalls : [];
@@ -34,6 +52,33 @@ async function dropPathToZone(page, zoneId, path) {
 }
 
 test.describe("Browser UI smoke", () => {
+  test("厳格CSPヘッダー下でもCSP違反なしで変換できる", async ({ page }) => {
+    const cspRelatedConsoleMessages = [];
+    const cspRelatedPageErrors = [];
+    const cspErrorPattern = /(content security policy|csp|refused to)/i;
+
+    page.on("console", (msg) => {
+      const text = msg.text();
+      if (cspErrorPattern.test(text)) {
+        cspRelatedConsoleMessages.push(text);
+      }
+    });
+    page.on("pageerror", (error) => {
+      const text = String(error?.message || error);
+      if (cspErrorPattern.test(text)) {
+        cspRelatedPageErrors.push(text);
+      }
+    });
+
+    await openWithMockAndStrictCsp(page, {});
+    await page.fill("#jpgInput", "/tmp/mock-jpg");
+    await page.click("#applyBtn");
+
+    await expect(page.locator("#actionMessage")).toContainText("変換完了: 1件");
+    expect(cspRelatedConsoleMessages).toEqual([]);
+    expect(cspRelatedPageErrors).toEqual([]);
+  });
+
   test("初期表示で主要要素が表示される", async ({ page }) => {
     await openWithMock(page, {
       sampleText: "20260208091530_FUJIFILM_X-T5_FUJIFILM_XF16-55mmF2.8RLMWR_CLASSIC_CHROME_IMG_0001",

@@ -138,7 +138,9 @@ function schedulePersistSettings() {
 
 function setMessage(text, isError = false) {
   el.message.textContent = text;
-  el.message.style.color = isError ? "#dc2626" : "#0f5132";
+  const hasText = String(text).trim().length > 0;
+  el.message.classList.toggle("is-error", hasText && isError);
+  el.message.classList.toggle("is-success", hasText && !isError);
 }
 
 function folderErrorPrefixesByField(field) {
