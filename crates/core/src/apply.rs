@@ -748,10 +748,12 @@ fn temp_path_for(original_path: &Path, index: usize) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    use super::backup_original_files;
     use super::{
-        apply_plan_with_options, apply_plan_with_options_with_paths, backup_original_files,
-        cleanup_backup_if_needed, resolve_backup_path, resolve_backup_path_with_reserved,
-        restore_operations, unique_backup_path, validate_undo_log, ApplyOptions, UndoLog,
+        apply_plan_with_options, apply_plan_with_options_with_paths, cleanup_backup_if_needed,
+        resolve_backup_path, resolve_backup_path_with_reserved, restore_operations,
+        unique_backup_path, validate_undo_log, ApplyOptions, UndoLog,
     };
     use crate::config::AppPaths;
     use crate::metadata::{MetadataSource, PhotoMetadata};

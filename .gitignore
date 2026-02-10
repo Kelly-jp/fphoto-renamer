@@ -24,3 +24,4 @@ target
 node_modules
 crates/gui/playwright-report
 crates/gui/test-results
+crates/gui/src-tauri/gen/schemas/windows-schema.json
