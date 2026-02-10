@@ -72,6 +72,8 @@ fn collect_tag_values(xml: &str) -> HashMap<String, String> {
             continue;
         }
 
+        collect_attribute_values(raw_tag, &mut values);
+
         let tag_name = raw_tag.split_whitespace().next().unwrap_or_default();
         let suffix = normalize_tag_name(tag_name);
         if !TARGET_XMP_KEYS.iter().any(|key| key == &suffix) {
@@ -96,6 +98,88 @@ fn collect_tag_values(xml: &str) -> HashMap<String, String> {
     }
 
     values
+}
+
+fn collect_attribute_values(raw_tag: &str, values: &mut HashMap<String, String>) {
+    let bytes = raw_tag.as_bytes();
+    let mut cursor = 0usize;
+
+    while cursor < bytes.len() && !bytes[cursor].is_ascii_whitespace() {
+        cursor += 1;
+    }
+
+    while cursor < bytes.len() {
+        while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+            cursor += 1;
+        }
+        if cursor >= bytes.len() || bytes[cursor] == b'/' {
+            break;
+        }
+
+        let name_start = cursor;
+        while cursor < bytes.len()
+            && !bytes[cursor].is_ascii_whitespace()
+            && bytes[cursor] != b'='
+            && bytes[cursor] != b'/'
+        {
+            cursor += 1;
+        }
+        if name_start == cursor {
+            cursor += 1;
+            continue;
+        }
+        let raw_name = &raw_tag[name_start..cursor];
+
+        while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+            cursor += 1;
+        }
+        if cursor >= bytes.len() || bytes[cursor] != b'=' {
+            while cursor < bytes.len() && !bytes[cursor].is_ascii_whitespace() {
+                cursor += 1;
+            }
+            continue;
+        }
+        cursor += 1;
+
+        while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+            cursor += 1;
+        }
+        if cursor >= bytes.len() {
+            break;
+        }
+
+        let (value_start, value_end) = if bytes[cursor] == b'"' || bytes[cursor] == b'\'' {
+            let quote = bytes[cursor];
+            cursor += 1;
+            let value_start = cursor;
+            while cursor < bytes.len() && bytes[cursor] != quote {
+                cursor += 1;
+            }
+            if cursor >= bytes.len() {
+                break;
+            }
+            let value_end = cursor;
+            cursor += 1;
+            (value_start, value_end)
+        } else {
+            let value_start = cursor;
+            while cursor < bytes.len() && !bytes[cursor].is_ascii_whitespace() {
+                cursor += 1;
+            }
+            (value_start, cursor)
+        };
+
+        let suffix = normalize_tag_name(raw_name);
+        if !TARGET_XMP_KEYS.iter().any(|key| key == &suffix) || values.contains_key(&suffix) {
+            continue;
+        }
+
+        let value = raw_tag[value_start..value_end].trim();
+        if value.is_empty() {
+            continue;
+        }
+        values.insert(suffix, html_unescape_basic(value));
+    }
 }
 
 fn normalize(value: Option<String>) -> Option<String> {
@@ -145,4 +229,51 @@ fn parse_date(input: &str) -> Option<DateTime<Local>> {
     }
 
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::read_xmp_metadata;
+    use chrono::{Datelike, Timelike};
+    use std::fs;
+    use tempfile::tempdir;
+
+    #[test]
+    fn read_xmp_metadata_supports_rdf_description_attributes() {
+        let temp = tempdir().expect("tempdir");
+        let xmp_path = temp.path().join("IMG_0001.xmp");
+        fs::write(
+            &xmp_path,
+            r#"<x:xmpmeta><rdf:RDF><rdf:Description exif:DateTimeOriginal="2026:02:08 10:20:30" tiff:Make="FUJIFILM" tiff:Model="X-H2" aux:LensModel="XF35mm F1.4 R" /></rdf:RDF></x:xmpmeta>"#,
+        )
+        .expect("write xmp");
+
+        let meta = read_xmp_metadata(&xmp_path).expect("read xmp");
+        let date = meta.date.expect("date should exist");
+        assert_eq!(date.year(), 2026);
+        assert_eq!(date.month(), 2);
+        assert_eq!(date.day(), 8);
+        assert_eq!(date.hour(), 10);
+        assert_eq!(date.minute(), 20);
+        assert_eq!(date.second(), 30);
+        assert_eq!(meta.camera_make.as_deref(), Some("FUJIFILM"));
+        assert_eq!(meta.camera_model.as_deref(), Some("X-H2"));
+        assert_eq!(meta.lens_model.as_deref(), Some("XF35mm F1.4 R"));
+    }
+
+    #[test]
+    fn read_xmp_metadata_supports_element_text_values() {
+        let temp = tempdir().expect("tempdir");
+        let xmp_path = temp.path().join("IMG_0002.xmp");
+        fs::write(
+            &xmp_path,
+            r#"<x:xmpmeta><rdf:RDF><rdf:Description><exif:DateTimeOriginal>2026:02:08 10:20:30</exif:DateTimeOriginal><exif:Make>FUJIFILM</exif:Make><aux:LensModel>XF16-55mm F2.8</aux:LensModel></rdf:Description></rdf:RDF></x:xmpmeta>"#,
+        )
+        .expect("write xmp");
+
+        let meta = read_xmp_metadata(&xmp_path).expect("read xmp");
+        assert_eq!(meta.camera_make.as_deref(), Some("FUJIFILM"));
+        assert_eq!(meta.lens_model.as_deref(), Some("XF16-55mm F2.8"));
+        assert!(meta.date.is_some());
+    }
 }

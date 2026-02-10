@@ -100,6 +100,9 @@ pub fn generate_plan(options: &PlanOptions) -> Result<RenamePlan> {
     if !options.jpg_input.exists() {
         anyhow::bail!("JPGフォルダが存在しません: {}", options.jpg_input.display());
     }
+    if !options.jpg_input.is_dir() {
+        anyhow::bail!("JPGフォルダではありません: {}", options.jpg_input.display());
+    }
     if let Some(raw_input) = options.raw_input.as_ref() {
         if !raw_input.exists() {
             anyhow::bail!("RAWフォルダが存在しません: {}", raw_input.display());
@@ -680,6 +683,31 @@ mod tests {
         assert!(err.to_string().contains(&format!(
             "RAWフォルダが存在しません: {}",
             missing_raw_root.display()
+        )));
+    }
+
+    #[test]
+    fn generate_plan_fails_when_jpg_input_is_not_directory() {
+        let temp = tempdir().expect("tempdir");
+        let jpg_file = temp.path().join("not-dir.JPG");
+        fs::write(&jpg_file, b"not-a-directory").expect("jpg file");
+
+        let result = generate_plan(&PlanOptions {
+            jpg_input: jpg_file.clone(),
+            raw_input: None,
+            raw_from_jpg_parent_when_missing: false,
+            recursive: false,
+            include_hidden: false,
+            template: "{orig_name}".to_string(),
+            dedupe_same_maker: true,
+            exclusions: Vec::new(),
+            max_filename_len: 240,
+        });
+
+        let err = result.expect_err("plan generation should fail");
+        assert!(err.to_string().contains(&format!(
+            "JPGフォルダではありません: {}",
+            jpg_file.display()
         )));
     }
 

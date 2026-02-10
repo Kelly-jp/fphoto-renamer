@@ -16,12 +16,21 @@ struct UndoLog {
     backup_originals: bool,
     #[serde(default)]
     jpg_root: Option<PathBuf>,
+    #[serde(default)]
+    backup_paths: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct RenameOperation {
     from: PathBuf,
     to: PathBuf,
+}
+
+#[derive(Debug, Clone)]
+struct ValidatedUndoLog {
+    operations: Vec<RenameOperation>,
+    backup_root: Option<PathBuf>,
+    backup_paths: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,9 +64,11 @@ pub fn apply_plan_with_options(plan: &RenamePlan, options: &ApplyOptions) -> Res
 
     validate_apply_candidates(plan, &candidates)?;
 
-    if options.backup_originals {
-        backup_original_files(plan, &candidates)?;
-    }
+    let backup_paths = if options.backup_originals {
+        backup_original_files(plan, &candidates)?
+    } else {
+        Vec::new()
+    };
 
     let mut staged = Vec::<StagedRename>::with_capacity(candidates.len());
     for (index, candidate) in candidates.iter().enumerate() {
@@ -104,7 +115,7 @@ pub fn apply_plan_with_options(plan: &RenamePlan, options: &ApplyOptions) -> Res
         });
     }
 
-    persist_undo(&operations, plan, options)?;
+    persist_undo(&operations, plan, options, &backup_paths)?;
 
     Ok(ApplyResult {
         applied: operations.len(),
@@ -217,7 +228,10 @@ fn rollback_after_final_rename_failure(staged: &[StagedRename], finalized: usize
     rollback_staged_to_original_paths(staged)
 }
 
-fn backup_original_files(plan: &RenamePlan, candidates: &[&RenameCandidate]) -> Result<()> {
+fn backup_original_files(
+    plan: &RenamePlan,
+    candidates: &[&RenameCandidate],
+) -> Result<Vec<PathBuf>> {
     let backup_root = plan.jpg_root.join("backup");
     fs::create_dir_all(&backup_root).with_context(|| {
         format!(
@@ -259,7 +273,10 @@ fn backup_original_files(plan: &RenamePlan, candidates: &[&RenameCandidate]) -> 
             Ok(())
         })?;
 
-    Ok(())
+    Ok(backup_jobs
+        .into_iter()
+        .map(|(_, backup_path)| backup_path)
+        .collect())
 }
 
 #[cfg(test)]
@@ -342,10 +359,11 @@ pub fn undo_last() -> Result<UndoResult> {
         )
     })?;
     let log = serde_json::from_str::<UndoLog>(&raw).context("取り消しログが壊れています")?;
+    let validated = validate_undo_log(&log)?;
 
-    let restored = restore_operations(&log)?;
+    let restored = restore_operations(&validated.operations)?;
 
-    cleanup_backup_if_needed(&log)?;
+    cleanup_backup_if_needed(&validated)?;
 
     fs::remove_file(&paths.undo_path).with_context(|| {
         format!(
@@ -357,9 +375,120 @@ pub fn undo_last() -> Result<UndoResult> {
     Ok(UndoResult { restored })
 }
 
-fn restore_operations(log: &UndoLog) -> Result<usize> {
+fn validate_undo_log(log: &UndoLog) -> Result<ValidatedUndoLog> {
+    let raw_jpg_root = log
+        .jpg_root
+        .as_ref()
+        .context("取り消しログにJPGルートが記録されていません")?;
+    let jpg_root = fs::canonicalize(raw_jpg_root).with_context(|| {
+        format!(
+            "取り消しログのJPGルートを解決できませんでした: {}",
+            raw_jpg_root.display()
+        )
+    })?;
+    if !jpg_root.is_dir() {
+        bail!(
+            "取り消しログのJPGルートがフォルダではありません: {}",
+            jpg_root.display()
+        );
+    }
+
+    let mut seen_from = HashSet::<PathBuf>::new();
+    let mut seen_to = HashSet::<PathBuf>::new();
+    let mut operations = Vec::<RenameOperation>::with_capacity(log.operations.len());
+    for operation in &log.operations {
+        let normalized_from =
+            normalize_path_within_root(&operation.from, &jpg_root, "取り消し元パス")?;
+        let normalized_to = normalize_path_within_root(&operation.to, &jpg_root, "取り消し先パス")?;
+
+        if !seen_from.insert(normalized_from.clone()) {
+            bail!(
+                "取り消しログに重複した取り消し元パスがあります: {}",
+                normalized_from.display()
+            );
+        }
+        if !seen_to.insert(normalized_to.clone()) {
+            bail!(
+                "取り消しログに重複した取り消し先パスがあります: {}",
+                normalized_to.display()
+            );
+        }
+
+        operations.push(RenameOperation {
+            from: normalized_from,
+            to: normalized_to,
+        });
+    }
+
+    if !log.backup_originals {
+        return Ok(ValidatedUndoLog {
+            operations,
+            backup_root: None,
+            backup_paths: Vec::new(),
+        });
+    }
+
+    let backup_root = jpg_root.join("backup");
+    let backup_root_canonical = if backup_root.exists() {
+        Some(fs::canonicalize(&backup_root).with_context(|| {
+            format!(
+                "バックアップルートを解決できませんでした: {}",
+                backup_root.display()
+            )
+        })?)
+    } else {
+        None
+    };
+
+    let mut backup_paths = Vec::<PathBuf>::new();
+    if let Some(backup_root_canonical) = backup_root_canonical.as_ref() {
+        for backup_path in &log.backup_paths {
+            if !backup_path.exists() {
+                continue;
+            }
+            if backup_path.is_dir() {
+                bail!(
+                    "取り消しログのバックアップパスがディレクトリです: {}",
+                    backup_path.display()
+                );
+            }
+            backup_paths.push(normalize_path_within_root(
+                backup_path,
+                backup_root_canonical,
+                "バックアップパス",
+            )?);
+        }
+    }
+
+    Ok(ValidatedUndoLog {
+        operations,
+        backup_root: Some(backup_root),
+        backup_paths,
+    })
+}
+
+fn normalize_path_within_root(path: &Path, root: &Path, label: &str) -> Result<PathBuf> {
+    let parent = path
+        .parent()
+        .with_context(|| format!("{label}に親ディレクトリがありません: {}", path.display()))?;
+    let file_name = path
+        .file_name()
+        .with_context(|| format!("{label}のファイル名が不正です: {}", path.display()))?;
+    let canonical_parent = fs::canonicalize(parent).with_context(|| {
+        format!(
+            "{label}の親ディレクトリを解決できませんでした: {}",
+            parent.display()
+        )
+    })?;
+    if !canonical_parent.starts_with(root) {
+        bail!("{label}が許可範囲外です: {}", path.display());
+    }
+    Ok(canonical_parent.join(file_name))
+}
+
+fn restore_operations(operations: &[RenameOperation]) -> Result<usize> {
     let mut restored = 0usize;
-    for op in log.operations.iter().rev() {
+    for op in operations.iter().rev() {
         if !op.to.exists() {
             continue;
         }
@@ -379,6 +508,7 @@ fn persist_undo(
     operations: &[RenameOperation],
     plan: &RenamePlan,
     options: &ApplyOptions,
+    backup_paths: &[PathBuf],
 ) -> Result<()> {
     let paths = app_paths()?;
     fs::create_dir_all(&paths.config_dir).with_context(|| {
@@ -392,6 +522,7 @@ fn persist_undo(
         operations: operations.to_vec(),
         backup_originals: options.backup_originals,
         jpg_root: Some(plan.jpg_root.clone()),
+        backup_paths: backup_paths.to_vec(),
     };
     let body =
         serde_json::to_string_pretty(&log).context("取り消しログのシリアライズに失敗しました")?;
@@ -404,36 +535,67 @@ fn persist_undo(
     Ok(())
 }
 
-fn cleanup_backup_if_needed(log: &UndoLog) -> Result<()> {
-    if !log.backup_originals {
-        return Ok(());
-    }
-
-    let Some(jpg_root) = log.jpg_root.as_ref() else {
+fn cleanup_backup_if_needed(log: &ValidatedUndoLog) -> Result<()> {
+    let Some(backup_root) = log.backup_root.as_ref() else {
         return Ok(());
     };
 
-    let backup_root = jpg_root.join("backup");
-    if !backup_root.exists() {
+    if log.backup_paths.is_empty() {
         return Ok(());
     }
 
-    if backup_root.is_dir() {
-        fs::remove_dir_all(&backup_root).with_context(|| {
+    for backup_path in &log.backup_paths {
+        if !backup_path.exists() {
+            continue;
+        }
+        if backup_path.is_dir() {
+            bail!(
+                "取り消しログのバックアップパスがディレクトリです: {}",
+                backup_path.display()
+            );
+        }
+        fs::remove_file(backup_path).with_context(|| {
+            format!(
+                "バックアップファイル削除に失敗しました: {}",
+                backup_path.display()
+            )
+        })?;
+        if let Some(parent) = backup_path.parent() {
+            remove_empty_dirs_until(parent, backup_root)?;
+        }
+    }
+
+    if backup_root.exists() && backup_root.is_dir() && directory_is_empty(backup_root)? {
+        fs::remove_dir(backup_root).with_context(|| {
             format!(
                 "バックアップフォルダ削除に失敗しました: {}",
                 backup_root.display()
             )
         })?;
-    } else {
-        fs::remove_file(&backup_root).with_context(|| {
-            format!(
-                "バックアップファイル削除に失敗しました: {}",
-                backup_root.display()
-            )
-        })?;
     }
 
+    Ok(())
+}
+
+fn directory_is_empty(path: &Path) -> Result<bool> {
+    let mut entries = fs::read_dir(path)
+        .with_context(|| format!("ディレクトリを読めませんでした: {}", path.display()))?;
+    Ok(entries.next().is_none())
+}
+
+fn remove_empty_dirs_until(start: &Path, stop: &Path) -> Result<()> {
+    let mut current = Some(start.to_path_buf());
+    while let Some(dir) = current {
+        if dir == stop || !dir.starts_with(stop) {
+            break;
+        }
+        if !dir.exists() || !dir.is_dir() || !directory_is_empty(&dir)? {
+            break;
+        }
+        fs::remove_dir(&dir)
+            .with_context(|| format!("空ディレクトリ削除に失敗しました: {}", dir.display()))?;
+        current = dir.parent().map(PathBuf::from);
+    }
     Ok(())
 }
 
@@ -454,8 +616,8 @@ fn temp_path_for(original_path: &Path, index: usize) -> PathBuf {
 mod tests {
     use super::{
         apply_plan_with_options, cleanup_backup_if_needed, resolve_backup_path,
-        resolve_backup_path_with_reserved, restore_operations, unique_backup_path, ApplyOptions,
-        UndoLog,
+        resolve_backup_path_with_reserved, restore_operations, unique_backup_path,
+        validate_undo_log, ApplyOptions, UndoLog,
     };
     use crate::metadata::{MetadataSource, PhotoMetadata};
     use crate::planner::{RenameCandidate, RenamePlan, RenameStats};
@@ -551,14 +713,17 @@ mod tests {
         let jpg_root = temp.path().join("jpg");
         let backup_root = jpg_root.join("backup");
         fs::create_dir_all(&backup_root).expect("create backup root");
-        fs::write(backup_root.join("file.txt"), b"x").expect("create backup file");
+        let backup_file = backup_root.join("file.txt");
+        fs::write(&backup_file, b"x").expect("create backup file");
 
         let log = UndoLog {
             operations: Vec::new(),
             backup_originals: true,
             jpg_root: Some(jpg_root.clone()),
+            backup_paths: vec![backup_file],
         };
-        cleanup_backup_if_needed(&log).expect("cleanup should succeed");
+        let validated = validate_undo_log(&log).expect("undo log should be valid");
+        cleanup_backup_if_needed(&validated).expect("cleanup should succeed");
         assert!(!backup_root.exists());
     }
 
@@ -573,8 +738,57 @@ mod tests {
             operations: Vec::new(),
             backup_originals: false,
             jpg_root: Some(jpg_root),
+            backup_paths: Vec::new(),
         };
-        cleanup_backup_if_needed(&log).expect("cleanup should succeed");
+        let validated = validate_undo_log(&log).expect("undo log should be valid");
+        cleanup_backup_if_needed(&validated).expect("cleanup should succeed");
+        assert!(backup_root.exists());
+    }
+
+    #[test]
+    fn cleanup_backup_if_needed_keeps_untracked_backup_files() {
+        let temp = tempdir().expect("tempdir");
+        let jpg_root = temp.path().join("jpg");
+        let backup_root = jpg_root.join("backup");
+        fs::create_dir_all(&backup_root).expect("create backup root");
+        let tracked = backup_root.join("tracked.txt");
+        let keep = backup_root.join("keep.txt");
+        fs::write(&tracked, b"x").expect("create tracked file");
+        fs::write(&keep, b"x").expect("create keep file");
+
+        let log = UndoLog {
+            operations: Vec::new(),
+            backup_originals: true,
+            jpg_root: Some(jpg_root),
+            backup_paths: vec![tracked.clone()],
+        };
+        let validated = validate_undo_log(&log).expect("undo log should be valid");
+        cleanup_backup_if_needed(&validated).expect("cleanup should succeed");
+
+        assert!(!tracked.exists());
+        assert!(keep.exists());
+        assert!(backup_root.exists());
+    }
+
+    #[test]
+    fn cleanup_backup_if_needed_skips_when_backup_paths_missing_in_legacy_log() {
+        let temp = tempdir().expect("tempdir");
+        let jpg_root = temp.path().join("jpg");
+        let backup_root = jpg_root.join("backup");
+        fs::create_dir_all(&backup_root).expect("create backup root");
+        let keep = backup_root.join("keep.txt");
+        fs::write(&keep, b"x").expect("create keep file");
+
+        let log = UndoLog {
+            operations: Vec::new(),
+            backup_originals: true,
+            jpg_root: Some(jpg_root),
+            backup_paths: Vec::new(),
+        };
+        let validated = validate_undo_log(&log).expect("undo log should be valid");
+        cleanup_backup_if_needed(&validated).expect("cleanup should succeed");
+
+        assert!(keep.exists());
         assert!(backup_root.exists());
     }
 
@@ -766,12 +980,38 @@ mod tests {
             ],
             backup_originals: false,
             jpg_root: None,
+            backup_paths: Vec::new(),
         };
 
-        let restored = restore_operations(&log).expect("restore should succeed");
+        let restored = restore_operations(&log.operations).expect("restore should succeed");
         assert_eq!(restored, 1);
         assert!(from_a.exists());
         assert!(!to_a.exists());
         assert!(!from_b.exists());
+    }
+
+    #[test]
+    fn validate_undo_log_rejects_operation_outside_jpg_root() {
+        let temp = tempdir().expect("tempdir");
+        let jpg_root = temp.path().join("jpg");
+        let outside_root = temp.path().join("outside");
+        fs::create_dir_all(&jpg_root).expect("create jpg root");
+        fs::create_dir_all(&outside_root).expect("create outside root");
+
+        let inside_from = jpg_root.join("IMG_0001.JPG");
+        let outside_to = outside_root.join("RENAMED_0001.JPG");
+
+        let log = UndoLog {
+            operations: vec![super::RenameOperation {
+                from: inside_from,
+                to: outside_to,
+            }],
+            backup_originals: false,
+            jpg_root: Some(jpg_root),
+            backup_paths: Vec::new(),
+        };
+
+        let err = validate_undo_log(&log).expect_err("outside path must be rejected");
+        assert!(err.to_string().contains("許可範囲外"));
     }
 }

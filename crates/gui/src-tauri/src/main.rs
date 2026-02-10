@@ -3,8 +3,8 @@
 use chrono::{DateTime, Local, Utc};
 use fphoto_renamer_core::{
     apply_plan_with_options, generate_plan, load_config, render_preview_sample, save_config,
-    undo_last, validate_template, AppConfig, ApplyOptions, MetadataSource, PhotoMetadata,
-    PlanOptions, RenamePlan,
+    undo_last, validate_template, ApplyOptions, MetadataSource, PhotoMetadata, PlanOptions,
+    RenamePlan,
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -168,7 +168,7 @@ fn load_gui_settings_cmd() -> Result<GuiSettingsResponse, String> {
 
 #[tauri::command]
 fn save_gui_settings_cmd(request: SaveGuiSettingsRequest) -> Result<(), String> {
-    let mut config = load_config().unwrap_or_else(|_| AppConfig::default());
+    let mut config = load_config().map_err(|err| err.to_string())?;
     config.template = request.template;
     config.exclude_strings = request.exclusions;
     config.dedupe_same_maker = request.dedupe_same_maker;
