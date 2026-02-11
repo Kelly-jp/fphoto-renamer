@@ -21,6 +21,10 @@ macOS/Windows 向けの JPG リネームツールです。CLI と Tauri GUI は�
 - GitHub Actions の `Build Installers` は macOS/Windows 向けに `exiftool` を自動同梱します。
 - Windows MSI は `webviewInstallMode=offlineInstaller` で WebView2 Runtime を同梱します。
 - そのため、配布インストーラ版はエンドユーザー側で追加インストール不要です。
+- `Build Installers` 実行時は CLI の release ビルドも同時に行い、
+  `cli-Linux` / `cli-macOS` / `cli-Windows` artifact も生成します。
+- GitHub Actions の `Build CLI` は Ubuntu/macOS/Windows 向けに CLI の release ビルドを行い、
+  `cli-Linux` / `cli-macOS` / `cli-Windows` artifact を生成します。
 
 ### Debug ビルド
 

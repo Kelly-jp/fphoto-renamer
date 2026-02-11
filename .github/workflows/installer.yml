@@ -91,3 +91,53 @@ jobs:
           name: ${{ matrix.artifact_name }}
           path: artifacts/*.${{ matrix.ext }}
           if-no-files-found: error
+
+  build-cli:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact_name: cli-Linux
+            binary_name: fphoto-renamer-cli
+          - os: macos-latest
+            artifact_name: cli-macOS
+            binary_name: fphoto-renamer-cli
+          - os: windows-latest
+            artifact_name: cli-Windows
+            binary_name: fphoto-renamer-cli.exe
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build CLI (release)
+        run: cargo build -p fphoto-renamer-cli --release --locked
+
+      - name: Collect CLI artifacts (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          cp "target/release/${{ matrix.binary_name }}" "artifacts/${{ matrix.binary_name }}"
+
+      - name: Collect CLI artifacts (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          Copy-Item "target/release/${{ matrix.binary_name }}" "artifacts/${{ matrix.binary_name }}"
+
+      - name: Upload CLI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: artifacts/*
+          if-no-files-found: error
