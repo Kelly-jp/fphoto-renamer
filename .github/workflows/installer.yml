@@ -6,6 +6,9 @@ on:
     tags:
       - "v*"
 
+permissions:
+  contents: write
+
 jobs:
   build-installer:
     runs-on: ${{ matrix.os }}
@@ -141,3 +144,40 @@ jobs:
           name: ${{ matrix.artifact_name }}
           path: artifacts/*
           if-no-files-found: error
+
+  create-release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-installer, build-cli]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download installer artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: installer-*
+          path: downloaded/installer
+
+      - name: Download CLI artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: cli-*
+          path: downloaded/cli
+
+      - name: Prepare release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+
+          cp downloaded/installer/installer-macos-dmg/*.dmg release-assets/
+          cp downloaded/installer/installer-windows-msi/*.msi release-assets/
+          cp downloaded/cli/cli-Linux/fphoto-renamer-cli release-assets/fphoto-renamer-cli-linux
+          cp downloaded/cli/cli-macOS/fphoto-renamer-cli release-assets/fphoto-renamer-cli-macos
+          cp downloaded/cli/cli-Windows/fphoto-renamer-cli.exe release-assets/fphoto-renamer-cli-windows.exe
+
+          ls -la release-assets
+
+      - name: Create GitHub Release and upload assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*
+          generate_release_notes: true
