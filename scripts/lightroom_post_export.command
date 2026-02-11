@@ -92,4 +92,4 @@ echo
 echo
 echo "Done."
 #read -r -p "Press Enter to close..."
-open "$INPUT_PATH"
+open "$JPG_INPUT"
