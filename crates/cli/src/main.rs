@@ -9,6 +9,7 @@ use fphoto_renamer_core::{
 #[derive(Debug, Parser)]
 #[command(name = "fphoto-renamer-cli")]
 #[command(about = "JPG写真のファイル名をテンプレートで一括リネームします")]
+#[command(version)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -156,6 +157,7 @@ fn print_table(plan: &fphoto_renamer_core::RenamePlan) {
 #[cfg(test)]
 mod tests {
     use super::{Cli, Commands, OutputFormat};
+    use clap::error::ErrorKind;
     use clap::Parser;
     use fphoto_renamer_core::DEFAULT_TEMPLATE;
 
@@ -234,6 +236,19 @@ mod tests {
         assert!(
             rendered.contains("invalid value"),
             "unexpected parse error: {rendered}"
+        );
+    }
+
+    #[test]
+    fn parse_version_option_displays_version() {
+        let err = Cli::try_parse_from(["fphoto-renamer-cli", "--version"])
+            .expect_err("--version should display version and exit");
+        assert_eq!(err.kind(), ErrorKind::DisplayVersion);
+
+        let rendered = err.to_string();
+        assert!(
+            rendered.contains(env!("CARGO_PKG_VERSION")),
+            "version is not included in output: {rendered}"
         );
     }
 }

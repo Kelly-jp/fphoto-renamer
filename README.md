@@ -26,6 +26,18 @@ macOS/Windows 向けの JPG リネームツールです。CLI と Tauri GUI は�
 - GitHub Actions の `Build CLI` は Ubuntu/macOS/Windows 向けに CLI の release ビルドを行い、
   `cli-Linux` / `cli-macOS` / `cli-Windows` artifact を生成します。
 
+## macOS で起動できない場合（com.apple.quarantine）
+
+macOS では、ダウンロードした `.app` に `com.apple.quarantine` 属性が自動で付与され、起動がブロックされる場合があります。
+配布元が信頼できることを確認したうえで、必要な場合のみ次を実行してください。
+パスは適宜変更ください。
+
+```bash
+xattr -dr com.apple.quarantine /Applications/fphoto-renamer.app
+```
+
+この操作は Gatekeeper の保護を回避するため、実行は自己責任でお願いします。
+
 ### Debug ビルド
 
 ```bash
