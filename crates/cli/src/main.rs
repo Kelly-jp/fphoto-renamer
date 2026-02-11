@@ -5,6 +5,9 @@ use fphoto_renamer_core::{
     app_paths, apply_plan_with_options, generate_plan, load_config, parse_template, undo_last,
     ApplyOptions, PlanOptions, DEFAULT_TEMPLATE,
 };
+use std::path::PathBuf;
+
+const EXIFTOOL_PATH_ENV: &str = "FPHOTO_EXIFTOOL_PATH";
 
 #[derive(Debug, Parser)]
 #[command(name = "fphoto-renamer-cli")]
@@ -77,6 +80,7 @@ fn main() -> Result<()> {
 }
 
 fn cmd_rename(args: RenameArgs) -> Result<()> {
+    configure_exiftool_path();
     parse_template(&args.template)?;
 
     let options = PlanOptions {
@@ -118,6 +122,92 @@ fn cmd_rename(args: RenameArgs) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn configure_exiftool_path() {
+    if std::env::var_os(EXIFTOOL_PATH_ENV).is_some() {
+        return;
+    }
+
+    for candidate in exiftool_path_candidates() {
+        if candidate.is_file() {
+            std::env::set_var(EXIFTOOL_PATH_ENV, candidate);
+            return;
+        }
+    }
+}
+
+fn exiftool_path_candidates() -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+
+    #[cfg(target_os = "windows")]
+    let binary_name = "exiftool.exe";
+    #[cfg(not(target_os = "windows"))]
+    let binary_name = "exiftool";
+
+    if let Some(path) = find_in_path(binary_name) {
+        candidates.push(path);
+    }
+
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            #[cfg(target_os = "windows")]
+            {
+                candidates.push(exe_dir.join("resources/bin/windows/exiftool.exe"));
+                candidates.push(exe_dir.join("exiftool.exe"));
+            }
+            #[cfg(target_os = "macos")]
+            {
+                candidates.push(exe_dir.join("resources/bin/macos/exiftool"));
+                candidates.push(exe_dir.join("exiftool"));
+            }
+            #[cfg(target_os = "linux")]
+            {
+                candidates.push(exe_dir.join("resources/bin/linux/exiftool"));
+                candidates.push(exe_dir.join("exiftool"));
+            }
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        candidates.push(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../gui/src-tauri/resources/bin/windows/exiftool.exe"),
+        );
+    }
+    #[cfg(target_os = "macos")]
+    {
+        candidates.push(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../gui/src-tauri/resources/bin/macos/exiftool"),
+        );
+        candidates.push(PathBuf::from("/opt/homebrew/bin/exiftool"));
+        candidates.push(PathBuf::from("/usr/local/bin/exiftool"));
+        candidates.push(PathBuf::from("/usr/bin/exiftool"));
+    }
+    #[cfg(target_os = "linux")]
+    {
+        candidates.push(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../gui/src-tauri/resources/bin/linux/exiftool"),
+        );
+        candidates.push(PathBuf::from("/usr/local/bin/exiftool"));
+        candidates.push(PathBuf::from("/usr/bin/exiftool"));
+    }
+
+    candidates
+}
+
+fn find_in_path(binary_name: &str) -> Option<PathBuf> {
+    let path_var = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&path_var) {
+        let candidate = dir.join(binary_name);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    None
 }
 
 fn cmd_undo() -> Result<()> {

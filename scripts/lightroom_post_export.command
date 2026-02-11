@@ -9,7 +9,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # リポジトリのルートディレクトリ（scripts の1つ上）
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # 実行する CLI バイナリ（release）
-CLI_BIN="${PROJECT_ROOT}/target/release/fphoto-renamer-cli"
+CLI_BIN="${SCRIPT_DIR}/fphoto-renamer-cli"
 
 # ---- Settings (edit as needed) ----
 # リネームに使うテンプレート文字列
@@ -19,7 +19,7 @@ USE_RAW_PARENT_IF_MISSING=1
 # 1: カメラメーカー名とレンズメーカー名が同じ場合は重複を除去 / 0: 除去しない
 DEDUPE_SAME_MAKER=1
 # 1: 変換前に backup フォルダへバックアップを作成 / 0: 作成しない
-BACKUP_ORIGINALS=1
+BACKUP_ORIGINALS=0
 # ファイル名から削除したい文字列（--exclude として複数指定）
 EXCLUDES=(
   "-強化-NR"

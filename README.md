@@ -36,6 +36,10 @@ macOS では、ダウンロードした `.app` に `com.apple.quarantine` 属性
 xattr -dr com.apple.quarantine /Applications/fphoto-renamer.app
 ```
 
+もしくは、下記をお試しください。
+https://support.apple.com/ja-jp/guide/mac-help/mh40616/mac
+
+
 この操作は Gatekeeper の保護を回避するため、実行は自己責任でお願いします。
 
 ### Debug ビルド
