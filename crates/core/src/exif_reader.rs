@@ -20,6 +20,8 @@ const EXIFTOOL_ARGS: &[&str] = &[
     "-Model",
     "-Saturation",
     "-ColorMode",
+    "-CameraProfile",
+    "-CameraProfilesProfileName",
     "-LensMake",
     "-LensManufacturer",
     "-LensModel",
@@ -182,11 +184,44 @@ fn pick_film_simulation_from_json(json: &JsonValue) -> Option<String> {
         }
     }
 
+    for key in ["CameraProfile", "CameraProfilesProfileName"] {
+        if let Some(raw) = pick_json_string(json, &[key]) {
+            if let Some(mapped) = normalize_film_simulation_from_camera_profile(&raw) {
+                return Some(mapped);
+            }
+        }
+    }
+
     if let Some(raw) = pick_json_string(json, &["PictureMode"]) {
         return normalize_film_simulation_name(&raw, false);
     }
 
     None
+}
+
+fn normalize_film_simulation_from_camera_profile(raw: &str) -> Option<String> {
+    let text = raw.trim().trim_matches('"');
+    if text.is_empty() {
+        return None;
+    }
+
+    let profile = text
+        .split_once(' ')
+        .and_then(|(head, tail)| {
+            if head.eq_ignore_ascii_case("camera") {
+                Some(tail)
+            } else {
+                None
+            }
+        })
+        .unwrap_or(text)
+        .trim();
+    if profile.is_empty() {
+        return None;
+    }
+
+    normalize_film_simulation_from_saturation(profile)
+        .or_else(|| normalize_film_simulation_name(profile, false))
 }
 
 fn normalize_film_simulation_from_saturation(raw: &str) -> Option<String> {
@@ -196,13 +231,13 @@ fn normalize_film_simulation_from_saturation(raw: &str) -> Option<String> {
     }
 
     if upper.contains("ACROS") {
-        if upper.contains("RED FILTER") {
+        if upper.contains("RED FILTER") || upper.contains("+R") {
             return Some("ACROS+ R FILTER".to_string());
         }
-        if upper.contains("YELLOW FILTER") {
+        if upper.contains("YELLOW FILTER") || upper.contains("+YE") || upper.contains("+Y") {
             return Some("ACROS+ Ye FILTER".to_string());
         }
-        if upper.contains("GREEN FILTER") {
+        if upper.contains("GREEN FILTER") || upper.contains("+G") {
             return Some("ACROS+ G FILTER".to_string());
         }
         return Some("ACROS".to_string());
@@ -607,6 +642,10 @@ mod tests {
             Some("ACROS+ R FILTER")
         );
         assert_eq!(
+            normalize_film_simulation_from_saturation("ACROS+Ye Filter").as_deref(),
+            Some("ACROS+ Ye FILTER")
+        );
+        assert_eq!(
             normalize_film_simulation_from_saturation("B&W Green Filter").as_deref(),
             Some("MONOCHROME+ G FILTER")
         );
@@ -642,6 +681,29 @@ mod tests {
         assert_eq!(
             pick_film_simulation_from_json(&json).as_deref(),
             Some("PROVIA")
+        );
+    }
+
+    #[test]
+    fn pick_film_simulation_uses_camera_profile_when_film_mode_missing() {
+        let json = json!({
+            "Saturation": "+2 (high)",
+            "CameraProfile": "Camera PROVIA/Standard"
+        });
+        assert_eq!(
+            pick_film_simulation_from_json(&json).as_deref(),
+            Some("PROVIA")
+        );
+    }
+
+    #[test]
+    fn pick_film_simulation_parses_acros_filter_from_camera_profile() {
+        let json = json!({
+            "CameraProfile": "Camera ACROS+R Filter"
+        });
+        assert_eq!(
+            pick_film_simulation_from_json(&json).as_deref(),
+            Some("ACROS+ R FILTER")
         );
     }
 }
