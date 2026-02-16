@@ -1,6 +1,6 @@
 # fphoto-renamer リリースノート
 
-## Unreleased
+## v0.5.0 (2026-02-16)
 
 ### 変更点
 
