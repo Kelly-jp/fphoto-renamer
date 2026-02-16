@@ -37,24 +37,27 @@ rem set "FPHOTO_EXIFTOOL_PATH=C:\tools\exiftool\exiftool.exe"
 rem -----------------------------------
 
 if "%~1"=="" (
-  echo Usage: %~nx0 ^<exported_folder^>
+  echo Usage: %~nx0 ^<exported_path^>
   exit /b 2
 )
 
 rem Lightroom から渡される引数（書き出し先ファイル/フォルダ）
 set "INPUT_PATH=%~1"
+set "JPG_INPUT="
+set "OPEN_PATH="
 
-rem フォルダが渡された場合はそのまま、ファイルが渡された場合は親フォルダを使う
+rem フォルダが渡された場合はそのまま、ファイルが渡された場合もファイルパスのままCLIへ渡す
 if exist "%INPUT_PATH%\*" (
   set "JPG_INPUT=%INPUT_PATH%"
+  set "OPEN_PATH=%INPUT_PATH%"
 ) else (
-  for %%I in ("%INPUT_PATH%") do set "JPG_INPUT=%%~dpI"
-  if defined JPG_INPUT if "!JPG_INPUT:~-1!"=="\" set "JPG_INPUT=!JPG_INPUT:~0,-1!"
-)
-
-if not exist "%JPG_INPUT%\*" (
-  echo Input folder not found: "%JPG_INPUT%"
-  exit /b 3
+  if exist "%INPUT_PATH%" (
+    set "JPG_INPUT=%INPUT_PATH%"
+    for %%I in ("%INPUT_PATH%") do set "OPEN_PATH=%%~dpI"
+  ) else (
+    echo Input path not found: "%INPUT_PATH%"
+    exit /b 3
+  )
 )
 
 if not exist "%CLI_BIN%" (
@@ -106,5 +109,5 @@ if errorlevel 1 (
 
 echo.
 echo Done.
-start "" "%JPG_INPUT%"
+start "" "%OPEN_PATH%"
 endlocal

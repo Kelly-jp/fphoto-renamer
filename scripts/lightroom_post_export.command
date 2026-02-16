@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Lightroom post-process helper for fphoto-renamer CLI.
-# Lightroom passes an exported folder path as the first argument.
+# Lightroom passes an exported file or folder path as the first argument.
 
 # この .command ファイルが置かれているディレクトリ
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -32,23 +32,22 @@ EXCLUDES=(
 # -----------------------------------
 
 if [[ $# -lt 1 ]]; then
-  echo "Usage: $0 <exported_folder>"
+  echo "Usage: $0 <exported_path>"
   exit 2
 fi
 
 # Lightroom から渡される引数（書き出し先のファイルまたはフォルダ）
 INPUT_PATH="$1"
-if [[ -f "${INPUT_PATH}" ]]; then
-  # ファイルが渡された場合は、その親フォルダを JPG 入力にする
-  JPG_INPUT="$(dirname "${INPUT_PATH}")"
-else
+if [[ -d "${INPUT_PATH}" ]]; then
   # フォルダが渡された場合は、そのまま JPG 入力にする
   JPG_INPUT="${INPUT_PATH}"
-fi
-JPG_INPUT="${JPG_INPUT%/}"
-
-if [[ ! -d "${JPG_INPUT}" ]]; then
-  echo "Input folder not found: ${JPG_INPUT}"
+  OPEN_PATH="${INPUT_PATH}"
+elif [[ -f "${INPUT_PATH}" ]]; then
+  # ファイルが渡された場合は、ファイルパスのまま JPG 入力にする
+  JPG_INPUT="${INPUT_PATH}"
+  OPEN_PATH="$(dirname "${INPUT_PATH}")"
+else
+  echo "Input path not found: ${INPUT_PATH}"
   exit 3
 fi
 
@@ -92,4 +91,4 @@ echo
 echo
 echo "Done."
 #read -r -p "Press Enter to close..."
-open "$JPG_INPUT"
+open "$OPEN_PATH"

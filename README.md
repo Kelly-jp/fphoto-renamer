@@ -67,6 +67,8 @@ CLI:
 
 ```bash
 cargo run -p fphoto-renamer-cli -- rename --jpg-input /path/to/jpg
+# 単一JPG/JPEGファイルを対象にする場合
+cargo run -p fphoto-renamer-cli -- rename --jpg-input /path/to/jpg/DSC00001.JPG
 ```
 
 GUI:
@@ -81,6 +83,7 @@ CLI:
 
 ```bash
 ./target/release/fphoto-renamer-cli rename --jpg-input /path/to/jpg
+./target/release/fphoto-renamer-cli rename --jpg-input /path/to/jpg/DSC00001.JPG
 ```
 
 GUI:
@@ -93,12 +96,13 @@ Windows (PowerShell) の例:
 
 ```powershell
 .\target\release\fphoto-renamer-cli.exe rename --jpg-input C:\path\to\jpg
+.\target\release\fphoto-renamer-cli.exe rename --jpg-input C:\path\to\jpg\DSC00001.JPG
 .\target\release\fphoto-renamer-gui.exe
 ```
 
 ## 機能
 
-- JPG フォルダ必須、RAW フォルダ任意
+- CLI の `--jpg-input` はフォルダまたは単一JPG/JPEGファイルを受け付け、RAW フォルダは任意
 - RAW フォルダ指定時は同名ベースで探索し、優先順位は `XMP -> DNG -> RAF`
 - RAW フォルダを明示指定した場合、そのパスが存在しない/フォルダでないならエラー（JPG へはフォールバックしない）
 - RAW フォルダ未指定時に、JPG フォルダの1つ上の階層を RAW 探索ルートにするオプション（CLI/GUI）
@@ -113,13 +117,14 @@ Windows (PowerShell) の例:
 - 削除文字列はスペース/ハイフン/アンダースコアの揺れを吸収して削除
 - Windows/macOS 禁止文字の正規化
 - GUI の「バックアップ」チェックONで、適用時に `JPGフォルダ/backup` へ元ファイルをバックアップ
-- GUI はフォルダ選択・ドラッグ＆ドロップ・クリアボタンに対応
+- GUI はフォルダ選択・ドラッグ＆ドロップ・クリアボタンに対応（GUI入力は従来通りフォルダ前提）
 - dry-run 既定、`--apply` で適用
 - 直近1回の undo
 
 ## CLI
 
 `--tokens` / `--delimiter` は廃止済みです。`--template` を使用してください。
+`--jpg-input` はフォルダ・単一JPG/JPEGファイルのどちらでも指定できます。
 
 ```bash
 cargo run -p fphoto-renamer-cli -- rename \
@@ -129,6 +134,14 @@ cargo run -p fphoto-renamer-cli -- rename \
   --exclude "-強化-NR" \
   --exclude "-DxO_DeepPRIME XD2s_XD"
 
+```
+
+単一ファイルだけを対象にする場合:
+
+```bash
+cargo run -p fphoto-renamer-cli -- rename \
+  --jpg-input /path/to/jpg/DSC00001.JPG \
+  --raw-parent-if-missing
 ```
 
 RAW フォルダを省略し、JPG 親フォルダを RAW 探索ルートとして使う場合:

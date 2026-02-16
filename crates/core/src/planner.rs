@@ -107,13 +107,13 @@ struct PrepareContext<'a> {
     max_filename_len: usize,
 }
 
+#[derive(Debug)]
+struct ResolvedJpgInput {
+    jpg_root: PathBuf,
+    jpg_files: Vec<PathBuf>,
+}
+
 pub fn generate_plan(options: &PlanOptions) -> Result<RenamePlan> {
-    if !options.jpg_input.exists() {
-        anyhow::bail!("JPGフォルダが存在しません: {}", options.jpg_input.display());
-    }
-    if !options.jpg_input.is_dir() {
-        anyhow::bail!("JPGフォルダではありません: {}", options.jpg_input.display());
-    }
     if let Some(raw_input) = options.raw_input.as_ref() {
         if !raw_input.exists() {
             anyhow::bail!("RAWフォルダが存在しません: {}", raw_input.display());
@@ -123,21 +123,26 @@ pub fn generate_plan(options: &PlanOptions) -> Result<RenamePlan> {
         }
     }
 
-    let parts = parse_template(&options.template)?;
-    let effective_raw_input = resolve_effective_raw_input(options);
-    let raw_match_index = effective_raw_input
-        .as_deref()
-        .map(|raw_root| build_raw_match_index(&options.jpg_input, raw_root, options.recursive));
     let mut stats = RenameStats::default();
-    let jpg_files = collect_jpg_files(
+    let resolved_jpg_input = resolve_jpg_input(
         &options.jpg_input,
         options.recursive,
         options.include_hidden,
         &mut stats,
     )?;
 
+    let parts = parse_template(&options.template)?;
+    let effective_raw_input = resolve_effective_raw_input(
+        options.raw_input.as_ref(),
+        options.raw_from_jpg_parent_when_missing,
+        &resolved_jpg_input.jpg_root,
+    );
+    let raw_match_index = effective_raw_input.as_deref().map(|raw_root| {
+        build_raw_match_index(&resolved_jpg_input.jpg_root, raw_root, options.recursive)
+    });
+
     let prepare_context = PrepareContext {
-        jpg_root: &options.jpg_input,
+        jpg_root: &resolved_jpg_input.jpg_root,
         raw_root: effective_raw_input.as_deref(),
         raw_match_index: raw_match_index.as_ref(),
         recursive: options.recursive,
@@ -146,7 +151,8 @@ pub fn generate_plan(options: &PlanOptions) -> Result<RenamePlan> {
         exclusions: &options.exclusions,
         max_filename_len: options.max_filename_len,
     };
-    let prepared_results: Vec<Result<PreparedCandidate>> = jpg_files
+    let prepared_results: Vec<Result<PreparedCandidate>> = resolved_jpg_input
+        .jpg_files
         .par_iter()
         .map(|jpg_path| prepare_candidate(&prepare_context, jpg_path))
         .collect();
@@ -185,7 +191,7 @@ pub fn generate_plan(options: &PlanOptions) -> Result<RenamePlan> {
     }
 
     Ok(RenamePlan {
-        jpg_root: options.jpg_input.clone(),
+        jpg_root: resolved_jpg_input.jpg_root,
         template: options.template.clone(),
         exclusions: options.exclusions.clone(),
         candidates,
@@ -224,16 +230,64 @@ fn prepare_candidate(context: &PrepareContext<'_>, jpg_path: &Path) -> Result<Pr
     })
 }
 
-fn resolve_effective_raw_input(options: &PlanOptions) -> Option<PathBuf> {
-    if let Some(raw_input) = options.raw_input.as_ref() {
+fn resolve_jpg_input(
+    jpg_input: &Path,
+    recursive: bool,
+    include_hidden: bool,
+    stats: &mut RenameStats,
+) -> Result<ResolvedJpgInput> {
+    if !jpg_input.exists() {
+        anyhow::bail!("JPGフォルダが存在しません: {}", jpg_input.display());
+    }
+
+    if jpg_input.is_dir() {
+        let jpg_files = collect_jpg_files(jpg_input, recursive, include_hidden, stats)?;
+        return Ok(ResolvedJpgInput {
+            jpg_root: jpg_input.to_path_buf(),
+            jpg_files,
+        });
+    }
+
+    if !jpg_input.is_file() {
+        anyhow::bail!(
+            "JPGフォルダまたはJPGファイルではありません: {}",
+            jpg_input.display()
+        );
+    }
+
+    if !is_jpg(jpg_input) {
+        anyhow::bail!("JPGファイルではありません: {}", jpg_input.display());
+    }
+
+    let jpg_root = jpg_input.parent().with_context(|| {
+        format!(
+            "JPGファイルの親フォルダを取得できませんでした: {}",
+            jpg_input.display()
+        )
+    })?;
+    stats.scanned_files = 1;
+    stats.jpg_files = 1;
+
+    Ok(ResolvedJpgInput {
+        jpg_root: jpg_root.to_path_buf(),
+        jpg_files: vec![jpg_input.to_path_buf()],
+    })
+}
+
+fn resolve_effective_raw_input(
+    raw_input: Option<&PathBuf>,
+    raw_from_jpg_parent_when_missing: bool,
+    jpg_root: &Path,
+) -> Option<PathBuf> {
+    if let Some(raw_input) = raw_input {
         return Some(raw_input.clone());
     }
 
-    if !options.raw_from_jpg_parent_when_missing {
+    if !raw_from_jpg_parent_when_missing {
         return None;
     }
 
-    options.jpg_input.parent().map(PathBuf::from)
+    jpg_root.parent().map(PathBuf::from)
 }
 
 pub fn render_preview_sample(
@@ -700,13 +754,13 @@ mod tests {
     }
 
     #[test]
-    fn generate_plan_fails_when_jpg_input_is_not_directory() {
+    fn generate_plan_fails_when_jpg_input_is_not_jpg_file() {
         let temp = tempdir().expect("tempdir");
-        let jpg_file = temp.path().join("not-dir.JPG");
-        fs::write(&jpg_file, b"not-a-directory").expect("jpg file");
+        let non_jpg_file = temp.path().join("not-jpg.txt");
+        fs::write(&non_jpg_file, b"not-a-jpg").expect("text file");
 
         let result = generate_plan(&PlanOptions {
-            jpg_input: jpg_file.clone(),
+            jpg_input: non_jpg_file.clone(),
             raw_input: None,
             raw_from_jpg_parent_when_missing: false,
             recursive: false,
@@ -719,8 +773,8 @@ mod tests {
 
         let err = result.expect_err("plan generation should fail");
         assert!(err.to_string().contains(&format!(
-            "JPGフォルダではありません: {}",
-            jpg_file.display()
+            "JPGファイルではありません: {}",
+            non_jpg_file.display()
         )));
     }
 
@@ -802,6 +856,94 @@ mod tests {
 
         let plan = generate_plan(&PlanOptions {
             jpg_input: jpg_root,
+            raw_input: None,
+            raw_from_jpg_parent_when_missing: true,
+            recursive: false,
+            include_hidden: false,
+            template: "{camera_maker}_{orig_name}".to_string(),
+            dedupe_same_maker: true,
+            exclusions: Vec::new(),
+            max_filename_len: 240,
+        })
+        .expect("plan generation should succeed");
+
+        assert_eq!(plan.candidates.len(), 1);
+        let c = &plan.candidates[0];
+        assert_eq!(c.metadata_source, MetadataSource::Xmp);
+        assert_eq!(c.source_label, "xmp");
+        assert_eq!(c.metadata.camera_make.as_deref(), Some("FUJIFILM"));
+    }
+
+    #[test]
+    fn generate_plan_single_jpg_file_targets_only_that_file() {
+        let temp = tempdir().expect("tempdir");
+        let jpg_root = temp.path().join("jpg");
+        fs::create_dir_all(&jpg_root).expect("jpg root");
+        let target_file = jpg_root.join("TARGET.JPG");
+        let other_file = jpg_root.join("OTHER.JPG");
+        fs::write(&target_file, b"target").expect("target jpg");
+        fs::write(&other_file, b"other").expect("other jpg");
+
+        let plan = generate_plan(&PlanOptions {
+            jpg_input: target_file.clone(),
+            raw_input: None,
+            raw_from_jpg_parent_when_missing: false,
+            recursive: false,
+            include_hidden: false,
+            template: "{orig_name}".to_string(),
+            dedupe_same_maker: true,
+            exclusions: Vec::new(),
+            max_filename_len: 240,
+        })
+        .expect("plan generation should succeed");
+
+        assert_eq!(plan.candidates.len(), 1);
+        assert_eq!(plan.candidates[0].original_path, target_file);
+    }
+
+    #[test]
+    fn generate_plan_single_jpg_file_sets_jpg_root_to_parent_directory() {
+        let temp = tempdir().expect("tempdir");
+        let jpg_root = temp.path().join("jpg");
+        fs::create_dir_all(&jpg_root).expect("jpg root");
+        let jpg_file = jpg_root.join("SINGLE.JPG");
+        fs::write(&jpg_file, b"single").expect("jpg file");
+
+        let plan = generate_plan(&PlanOptions {
+            jpg_input: jpg_file,
+            raw_input: None,
+            raw_from_jpg_parent_when_missing: false,
+            recursive: false,
+            include_hidden: false,
+            template: "{orig_name}".to_string(),
+            dedupe_same_maker: true,
+            exclusions: Vec::new(),
+            max_filename_len: 240,
+        })
+        .expect("plan generation should succeed");
+
+        assert_eq!(plan.jpg_root, jpg_root);
+    }
+
+    #[test]
+    fn generate_plan_single_jpg_file_uses_parent_as_raw_when_enabled() {
+        let temp = tempdir().expect("tempdir");
+        let parent_root = temp.path().join("session");
+        let jpg_root = parent_root.join("jpg");
+        fs::create_dir_all(&jpg_root).expect("jpg root");
+
+        let jpg_path = jpg_root.join("DSC01000.JPG");
+        fs::write(&jpg_path, b"not-a-real-jpg").expect("jpg file");
+
+        let xmp = parent_root.join("DSC01000.xmp");
+        fs::write(
+            &xmp,
+            r#"<x:xmpmeta><rdf:RDF><rdf:Description><exif:DateTimeOriginal>2026:02:08 10:20:30</exif:DateTimeOriginal><exif:Make>FUJIFILM</exif:Make></rdf:Description></rdf:RDF></x:xmpmeta>"#,
+        )
+        .expect("xmp file");
+
+        let plan = generate_plan(&PlanOptions {
+            jpg_input: jpg_path,
             raw_input: None,
             raw_from_jpg_parent_when_missing: true,
             recursive: false,
