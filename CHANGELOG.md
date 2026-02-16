@@ -1,5 +1,14 @@
 # fphoto-renamer リリースノート
 
+## v0.5.1 (2026-02-16)
+
+### 変更点
+
+- macOS 向け CLI を `aarch64` / `x86_64` から生成した universal binary へ変更し、Intel Mac / Apple Silicon の両方で実行可能に改善
+- Linux / macOS の CLI 配布形式を生バイナリから `tar.gz` に変更し、ダウンロード時の実行権限欠落を防止
+- Release 作成ワークフローの CLI asset 名を更新（`fphoto-renamer-cli-linux-x86_64.tar.gz` / `fphoto-renamer-cli-macos-universal.tar.gz` / `fphoto-renamer-cli-windows-x86_64.exe`）
+- README に Release Assets の CLI 実行手順と、旧配布形式の暫定対処（`chmod +x`）を追記
+
 ## v0.5.0 (2026-02-16)
 
 ### 変更点

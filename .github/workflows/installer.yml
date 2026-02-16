@@ -103,13 +103,10 @@ jobs:
         include:
           - os: ubuntu-latest
             artifact_name: cli-Linux
-            binary_name: fphoto-renamer-cli
           - os: macos-latest
             artifact_name: cli-macOS
-            binary_name: fphoto-renamer-cli
           - os: windows-latest
             artifact_name: cli-Windows
-            binary_name: fphoto-renamer-cli.exe
 
     steps:
       - name: Checkout
@@ -121,22 +118,54 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
-      - name: Build CLI (release)
+      - name: "Build CLI (release: Linux/Windows)"
+        if: runner.os != 'macOS'
         run: cargo build -p fphoto-renamer-cli --release --locked
 
-      - name: Collect CLI artifacts (Unix)
-        if: runner.os != 'Windows'
+      - name: "Build CLI (release: macOS universal)"
+        if: runner.os == 'macOS'
         shell: bash
         run: |
-          mkdir -p artifacts
-          cp "target/release/${{ matrix.binary_name }}" "artifacts/${{ matrix.binary_name }}"
+          set -euo pipefail
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          cargo build -p fphoto-renamer-cli --release --locked --target aarch64-apple-darwin
+          cargo build -p fphoto-renamer-cli --release --locked --target x86_64-apple-darwin
 
-      - name: Collect CLI artifacts (Windows)
+          mkdir -p artifacts
+          lipo -create \
+            target/aarch64-apple-darwin/release/fphoto-renamer-cli \
+            target/x86_64-apple-darwin/release/fphoto-renamer-cli \
+            -output artifacts/fphoto-renamer-cli
+          chmod +x artifacts/fphoto-renamer-cli
+          file artifacts/fphoto-renamer-cli
+
+      - name: Package CLI artifact (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          cp target/release/fphoto-renamer-cli artifacts/fphoto-renamer-cli
+          chmod +x artifacts/fphoto-renamer-cli
+          tar -czf artifacts/fphoto-renamer-cli-linux-x86_64.tar.gz -C artifacts fphoto-renamer-cli
+          rm artifacts/fphoto-renamer-cli
+          ls -la artifacts
+
+      - name: Package CLI artifact (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar -czf artifacts/fphoto-renamer-cli-macos-universal.tar.gz -C artifacts fphoto-renamer-cli
+          rm artifacts/fphoto-renamer-cli
+          ls -la artifacts
+
+      - name: Package CLI artifact (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path artifacts | Out-Null
-          Copy-Item "target/release/${{ matrix.binary_name }}" "artifacts/${{ matrix.binary_name }}"
+          Copy-Item "target/release/fphoto-renamer-cli.exe" "artifacts/fphoto-renamer-cli-windows-x86_64.exe"
 
       - name: Upload CLI artifact
         uses: actions/upload-artifact@v4
@@ -170,9 +199,9 @@ jobs:
 
           cp downloaded/installer/installer-macos-dmg/*.dmg release-assets/
           cp downloaded/installer/installer-windows-msi/*.msi release-assets/
-          cp downloaded/cli/cli-Linux/fphoto-renamer-cli release-assets/fphoto-renamer-cli-linux
-          cp downloaded/cli/cli-macOS/fphoto-renamer-cli release-assets/fphoto-renamer-cli-macos
-          cp downloaded/cli/cli-Windows/fphoto-renamer-cli.exe release-assets/fphoto-renamer-cli-windows.exe
+          cp downloaded/cli/cli-Linux/fphoto-renamer-cli-linux-x86_64.tar.gz release-assets/
+          cp downloaded/cli/cli-macOS/fphoto-renamer-cli-macos-universal.tar.gz release-assets/
+          cp downloaded/cli/cli-Windows/fphoto-renamer-cli-windows-x86_64.exe release-assets/
 
           ls -la release-assets
 

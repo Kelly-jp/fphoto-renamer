@@ -25,15 +25,41 @@ macOS/Windows 向けの JPG リネームツールです。CLI と Tauri GUI は�
   `cli-Linux` / `cli-macOS` / `cli-Windows` artifact も生成します。
 - GitHub Actions の `Build CLI` は Ubuntu/macOS/Windows 向けに CLI の release ビルドを行い、
   `cli-Linux` / `cli-macOS` / `cli-Windows` artifact を生成します。
+- Release Assets では CLI を次の形式で配布します。
+  - Linux: `fphoto-renamer-cli-linux-x86_64.tar.gz`
+  - macOS (Intel/Apple Silicon 共通): `fphoto-renamer-cli-macos-universal.tar.gz`
+  - Windows: `fphoto-renamer-cli-windows-x86_64.exe`
+
+## Release Assets の CLI 実行方法
+
+Linux/macOS は `tar.gz` を展開して実行してください（実行権限を保持できます）。
+
+```bash
+tar -xzf fphoto-renamer-cli-macos-universal.tar.gz
+./fphoto-renamer-cli --version
+```
+
+```bash
+tar -xzf fphoto-renamer-cli-linux-x86_64.tar.gz
+./fphoto-renamer-cli --version
+```
+
+`v0.5.0` 以前のように生バイナリを直接ダウンロードした場合、実行前に権限付与が必要です。
+
+```bash
+chmod +x ./fphoto-renamer-cli-macos
+./fphoto-renamer-cli-macos --version
+```
 
 ## macOS で起動できない場合（com.apple.quarantine）
 
-macOS では、ダウンロードした `.app` に `com.apple.quarantine` 属性が自動で付与され、起動がブロックされる場合があります。
+macOS では、ダウンロードした `.app` / CLI バイナリに `com.apple.quarantine` 属性が自動で付与され、起動がブロックされる場合があります。
 配布元が信頼できることを確認したうえで、必要な場合のみ次を実行してください。
 パスは適宜変更ください。
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/fphoto-renamer.app
+xattr -dr com.apple.quarantine /path/to/fphoto-renamer-cli
 ```
 
 もしくは、下記をお試しください。

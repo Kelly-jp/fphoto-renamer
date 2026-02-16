@@ -34,21 +34,54 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
-      - name: Build CLI (release)
+      - name: "Build CLI (release: Linux/Windows)"
+        if: runner.os != 'macOS'
         run: cargo build -p fphoto-renamer-cli --release --locked
 
-      - name: Prepare artifact (Unix)
-        if: runner.os != 'Windows'
+      - name: "Build CLI (release: macOS universal)"
+        if: runner.os == 'macOS'
+        shell: bash
         run: |
+          set -euo pipefail
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          cargo build -p fphoto-renamer-cli --release --locked --target aarch64-apple-darwin
+          cargo build -p fphoto-renamer-cli --release --locked --target x86_64-apple-darwin
+
+          mkdir -p artifacts
+          lipo -create \
+            target/aarch64-apple-darwin/release/fphoto-renamer-cli \
+            target/x86_64-apple-darwin/release/fphoto-renamer-cli \
+            -output artifacts/fphoto-renamer-cli
+          chmod +x artifacts/fphoto-renamer-cli
+          file artifacts/fphoto-renamer-cli
+
+      - name: Package artifact (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
           mkdir -p artifacts
           cp target/release/fphoto-renamer-cli artifacts/fphoto-renamer-cli
+          chmod +x artifacts/fphoto-renamer-cli
+          tar -czf artifacts/fphoto-renamer-cli-linux-x86_64.tar.gz -C artifacts fphoto-renamer-cli
+          rm artifacts/fphoto-renamer-cli
+          ls -la artifacts
 
-      - name: Prepare artifact (Windows)
+      - name: Package artifact (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar -czf artifacts/fphoto-renamer-cli-macos-universal.tar.gz -C artifacts fphoto-renamer-cli
+          rm artifacts/fphoto-renamer-cli
+          ls -la artifacts
+
+      - name: Package artifact (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path artifacts | Out-Null
-          Copy-Item target/release/fphoto-renamer-cli.exe artifacts/fphoto-renamer-cli.exe
+          Copy-Item target/release/fphoto-renamer-cli.exe artifacts/fphoto-renamer-cli-windows-x86_64.exe
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
