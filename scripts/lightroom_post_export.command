@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Lightroom post-process helper for fphoto-renamer CLI.
-# Lightroom passes an exported file or folder path as the first argument.
+# Lightroom passes one or more exported file/folder paths.
 
 # この .command ファイルが置かれているディレクトリ
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -32,24 +32,41 @@ EXCLUDES=(
 # -----------------------------------
 
 if [[ $# -lt 1 ]]; then
-  echo "Usage: $0 <exported_path>"
+  echo "Usage: $0 <exported_path...>"
   exit 2
 fi
 
 # Lightroom から渡される引数（書き出し先のファイルまたはフォルダ）
-INPUT_PATH="$1"
-if [[ -d "${INPUT_PATH}" ]]; then
-  # フォルダが渡された場合は、そのまま JPG 入力にする
-  JPG_INPUT="${INPUT_PATH}"
-  OPEN_PATH="${INPUT_PATH}"
-elif [[ -f "${INPUT_PATH}" ]]; then
-  # ファイルが渡された場合は、ファイルパスのまま JPG 入力にする
-  JPG_INPUT="${INPUT_PATH}"
-  OPEN_PATH="$(dirname "${INPUT_PATH}")"
-else
+JPG_INPUT_ARGS=()
+OPEN_PATH=""
+HAS_DIRECTORY_INPUT=0
+for INPUT_PATH in "$@"; do
+  if [[ -d "${INPUT_PATH}" ]]; then
+    if [[ $# -gt 1 ]]; then
+      echo "Folder input cannot be combined with other inputs: ${INPUT_PATH}"
+      exit 3
+    fi
+    JPG_INPUT_ARGS+=("--jpg-input" "${INPUT_PATH}")
+    OPEN_PATH="${INPUT_PATH}"
+    HAS_DIRECTORY_INPUT=1
+    continue
+  fi
+
+  if [[ -f "${INPUT_PATH}" ]]; then
+    if [[ "${HAS_DIRECTORY_INPUT}" -eq 1 ]]; then
+      echo "Folder input cannot be combined with file inputs: ${INPUT_PATH}"
+      exit 3
+    fi
+    JPG_INPUT_ARGS+=("--jpg-input" "${INPUT_PATH}")
+    if [[ -z "${OPEN_PATH}" ]]; then
+      OPEN_PATH="$(dirname "${INPUT_PATH}")"
+    fi
+    continue
+  fi
+
   echo "Input path not found: ${INPUT_PATH}"
   exit 3
-fi
+done
 
 if [[ ! -x "${CLI_BIN}" ]]; then
   echo "Release CLI not found. Building..."
@@ -59,7 +76,7 @@ fi
 CMD=(
   "${CLI_BIN}"
   rename
-  "--jpg-input" "${JPG_INPUT}"
+  "${JPG_INPUT_ARGS[@]}"
   "--template" "${TEMPLATE}"
   "--output" "table"
   "--apply"

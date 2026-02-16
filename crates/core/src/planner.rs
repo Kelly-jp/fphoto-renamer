@@ -12,7 +12,7 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Local};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
@@ -75,10 +75,16 @@ pub struct RenameStats {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RenamePlan {
     pub jpg_root: PathBuf,
+    #[serde(default = "default_jpg_roots")]
+    pub jpg_roots: Vec<PathBuf>,
     pub template: String,
     pub exclusions: Vec<String>,
     pub candidates: Vec<RenameCandidate>,
     pub stats: RenameStats,
+}
+
+fn default_jpg_roots() -> Vec<PathBuf> {
+    Vec::new()
 }
 
 #[derive(Debug)]
@@ -97,31 +103,38 @@ struct ResolvedMetadata {
 }
 
 struct PrepareContext<'a> {
-    jpg_root: &'a Path,
-    raw_root: Option<&'a Path>,
-    raw_match_index: Option<&'a RawMatchIndex>,
     recursive: bool,
     parts: &'a [TemplatePart],
     dedupe_same_maker: bool,
     exclusions: &'a [String],
     max_filename_len: usize,
+    raw_match_indexes: HashMap<MatchIndexKey, RawMatchIndex>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct MatchIndexKey {
+    jpg_root: PathBuf,
+    raw_root: PathBuf,
+}
+
+#[derive(Debug, Clone)]
+struct PreparedInput {
+    jpg_path: PathBuf,
+    jpg_root: PathBuf,
+    raw_root: Option<PathBuf>,
+    raw_match_key: Option<MatchIndexKey>,
 }
 
 #[derive(Debug)]
 struct ResolvedJpgInput {
     jpg_root: PathBuf,
+    jpg_roots: Vec<PathBuf>,
     jpg_files: Vec<PathBuf>,
+    jpg_root_by_file: HashMap<PathBuf, PathBuf>,
 }
 
 pub fn generate_plan(options: &PlanOptions) -> Result<RenamePlan> {
-    if let Some(raw_input) = options.raw_input.as_ref() {
-        if !raw_input.exists() {
-            anyhow::bail!("RAWフォルダが存在しません: {}", raw_input.display());
-        }
-        if !raw_input.is_dir() {
-            anyhow::bail!("RAWフォルダではありません: {}", raw_input.display());
-        }
-    }
+    validate_raw_input(options.raw_input.as_ref())?;
 
     let mut stats = RenameStats::default();
     let resolved_jpg_input = resolve_jpg_input(
@@ -131,30 +144,92 @@ pub fn generate_plan(options: &PlanOptions) -> Result<RenamePlan> {
         &mut stats,
     )?;
 
+    generate_plan_with_resolved_jpg_input(options, resolved_jpg_input, stats)
+}
+
+pub fn generate_plan_for_jpg_files(
+    options: &PlanOptions,
+    jpg_files: &[PathBuf],
+) -> Result<RenamePlan> {
+    validate_raw_input(options.raw_input.as_ref())?;
+
+    let mut stats = RenameStats::default();
+    let resolved_jpg_input = resolve_explicit_jpg_files(jpg_files, &mut stats)?;
+
+    generate_plan_with_resolved_jpg_input(options, resolved_jpg_input, stats)
+}
+
+fn validate_raw_input(raw_input: Option<&PathBuf>) -> Result<()> {
+    if let Some(raw_input) = raw_input {
+        if !raw_input.exists() {
+            anyhow::bail!("RAWフォルダが存在しません: {}", raw_input.display());
+        }
+        if !raw_input.is_dir() {
+            anyhow::bail!("RAWフォルダではありません: {}", raw_input.display());
+        }
+    }
+
+    Ok(())
+}
+
+fn generate_plan_with_resolved_jpg_input(
+    options: &PlanOptions,
+    resolved_jpg_input: ResolvedJpgInput,
+    mut stats: RenameStats,
+) -> Result<RenamePlan> {
     let parts = parse_template(&options.template)?;
-    let effective_raw_input = resolve_effective_raw_input(
-        options.raw_input.as_ref(),
-        options.raw_from_jpg_parent_when_missing,
-        &resolved_jpg_input.jpg_root,
-    );
-    let raw_match_index = effective_raw_input.as_deref().map(|raw_root| {
-        build_raw_match_index(&resolved_jpg_input.jpg_root, raw_root, options.recursive)
-    });
+    let prepared_inputs = resolved_jpg_input
+        .jpg_files
+        .iter()
+        .map(|jpg_path| {
+            let jpg_root_for_file = resolved_jpg_input
+                .jpg_root_by_file
+                .get(jpg_path)
+                .cloned()
+                .unwrap_or_else(|| resolved_jpg_input.jpg_root.clone());
+            let raw_root_for_file = resolve_raw_root_for_file(
+                options.raw_input.as_ref(),
+                options.raw_from_jpg_parent_when_missing,
+                &jpg_root_for_file,
+            );
+            PreparedInput {
+                jpg_path: jpg_path.clone(),
+                jpg_root: jpg_root_for_file,
+                raw_root: raw_root_for_file,
+                raw_match_key: None,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let mut raw_match_indexes = HashMap::<MatchIndexKey, RawMatchIndex>::new();
+    let prepared_inputs = prepared_inputs
+        .into_iter()
+        .map(|mut prepared_input| {
+            if let Some(raw_root_for_file) = prepared_input.raw_root.as_ref() {
+                let key = MatchIndexKey {
+                    jpg_root: prepared_input.jpg_root.clone(),
+                    raw_root: raw_root_for_file.clone(),
+                };
+                raw_match_indexes.entry(key.clone()).or_insert_with(|| {
+                    build_raw_match_index(&key.jpg_root, &key.raw_root, options.recursive)
+                });
+                prepared_input.raw_match_key = Some(key);
+            }
+            prepared_input
+        })
+        .collect::<Vec<_>>();
 
     let prepare_context = PrepareContext {
-        jpg_root: &resolved_jpg_input.jpg_root,
-        raw_root: effective_raw_input.as_deref(),
-        raw_match_index: raw_match_index.as_ref(),
         recursive: options.recursive,
         parts: &parts,
         dedupe_same_maker: options.dedupe_same_maker,
         exclusions: &options.exclusions,
         max_filename_len: options.max_filename_len,
+        raw_match_indexes,
     };
-    let prepared_results: Vec<Result<PreparedCandidate>> = resolved_jpg_input
-        .jpg_files
+    let prepared_results: Vec<Result<PreparedCandidate>> = prepared_inputs
         .par_iter()
-        .map(|jpg_path| prepare_candidate(&prepare_context, jpg_path))
+        .map(|prepared_input| prepare_candidate(&prepare_context, prepared_input))
         .collect();
 
     let mut prepared = Vec::with_capacity(prepared_results.len());
@@ -192,6 +267,7 @@ pub fn generate_plan(options: &PlanOptions) -> Result<RenamePlan> {
 
     Ok(RenamePlan {
         jpg_root: resolved_jpg_input.jpg_root,
+        jpg_roots: resolved_jpg_input.jpg_roots,
         template: options.template.clone(),
         exclusions: options.exclusions.clone(),
         candidates,
@@ -199,12 +275,19 @@ pub fn generate_plan(options: &PlanOptions) -> Result<RenamePlan> {
     })
 }
 
-fn prepare_candidate(context: &PrepareContext<'_>, jpg_path: &Path) -> Result<PreparedCandidate> {
+fn prepare_candidate(
+    context: &PrepareContext<'_>,
+    prepared_input: &PreparedInput,
+) -> Result<PreparedCandidate> {
+    let raw_match_index = prepared_input
+        .raw_match_key
+        .as_ref()
+        .and_then(|key| context.raw_match_indexes.get(key));
     let resolved = resolve_metadata(
-        context.jpg_root,
-        context.raw_root,
-        context.raw_match_index,
-        jpg_path,
+        &prepared_input.jpg_root,
+        prepared_input.raw_root.as_deref(),
+        raw_match_index,
+        &prepared_input.jpg_path,
         context.recursive,
     )?;
     let rendered =
@@ -214,7 +297,8 @@ fn prepare_candidate(context: &PrepareContext<'_>, jpg_path: &Path) -> Result<Pr
     let cleaned = cleanup_filename(&normalized_spaces);
     let sanitized = sanitize_filename(&cleaned);
 
-    let extension = jpg_path
+    let extension = prepared_input
+        .jpg_path
         .extension()
         .map(|v| format!(".{}", v.to_string_lossy()))
         .unwrap_or_default();
@@ -222,7 +306,7 @@ fn prepare_candidate(context: &PrepareContext<'_>, jpg_path: &Path) -> Result<Pr
         truncate_filename_if_needed(&sanitized, &extension, context.max_filename_len);
 
     Ok(PreparedCandidate {
-        original_path: jpg_path.to_path_buf(),
+        original_path: prepared_input.jpg_path.clone(),
         metadata: resolved.metadata,
         source_label: resolved.source_label,
         rendered_base,
@@ -242,9 +326,15 @@ fn resolve_jpg_input(
 
     if jpg_input.is_dir() {
         let jpg_files = collect_jpg_files(jpg_input, recursive, include_hidden, stats)?;
+        let jpg_root_by_file = jpg_files
+            .iter()
+            .map(|jpg_file| (jpg_file.clone(), jpg_input.to_path_buf()))
+            .collect::<HashMap<_, _>>();
         return Ok(ResolvedJpgInput {
             jpg_root: jpg_input.to_path_buf(),
+            jpg_roots: vec![jpg_input.to_path_buf()],
             jpg_files,
+            jpg_root_by_file,
         });
     }
 
@@ -268,16 +358,95 @@ fn resolve_jpg_input(
     stats.scanned_files = 1;
     stats.jpg_files = 1;
 
+    let jpg_path = jpg_input.to_path_buf();
+    let mut jpg_root_by_file = HashMap::<PathBuf, PathBuf>::new();
+    jpg_root_by_file.insert(jpg_path.clone(), jpg_root.to_path_buf());
+
     Ok(ResolvedJpgInput {
         jpg_root: jpg_root.to_path_buf(),
-        jpg_files: vec![jpg_input.to_path_buf()],
+        jpg_roots: vec![jpg_root.to_path_buf()],
+        jpg_files: vec![jpg_path],
+        jpg_root_by_file,
     })
 }
 
-fn resolve_effective_raw_input(
+fn resolve_explicit_jpg_files(
+    jpg_files: &[PathBuf],
+    stats: &mut RenameStats,
+) -> Result<ResolvedJpgInput> {
+    if jpg_files.is_empty() {
+        anyhow::bail!("JPGファイルが指定されていません");
+    }
+
+    let mut seen = HashSet::<PathBuf>::new();
+    let mut unique_files = Vec::<PathBuf>::new();
+    for path in jpg_files {
+        if seen.insert(path.clone()) {
+            unique_files.push(path.clone());
+        }
+    }
+
+    let mut resolved_root_canonicals = Vec::<PathBuf>::new();
+    let mut resolved_files = Vec::<PathBuf>::with_capacity(unique_files.len());
+    let mut resolved_jpg_roots = Vec::<PathBuf>::new();
+    let mut jpg_root_by_file = HashMap::<PathBuf, PathBuf>::new();
+
+    for jpg_file in unique_files {
+        if !jpg_file.exists() {
+            anyhow::bail!("JPGファイルが存在しません: {}", jpg_file.display());
+        }
+        if !jpg_file.is_file() {
+            anyhow::bail!("JPGファイルではありません: {}", jpg_file.display());
+        }
+        if !is_jpg(&jpg_file) {
+            anyhow::bail!("JPGファイルではありません: {}", jpg_file.display());
+        }
+
+        let parent = jpg_file.parent().with_context(|| {
+            format!(
+                "JPGファイルの親フォルダを取得できませんでした: {}",
+                jpg_file.display()
+            )
+        })?;
+        let parent_canonical = fs::canonicalize(parent).with_context(|| {
+            format!(
+                "JPGファイルの親フォルダを解決できませんでした: {}",
+                parent.display()
+            )
+        })?;
+        if !resolved_root_canonicals.contains(&parent_canonical) {
+            resolved_root_canonicals.push(parent_canonical);
+            resolved_jpg_roots.push(parent.to_path_buf());
+        }
+        jpg_root_by_file.insert(jpg_file.clone(), parent.to_path_buf());
+
+        stats.scanned_files += 1;
+        stats.jpg_files += 1;
+        resolved_files.push(jpg_file);
+    }
+
+    resolved_files.sort();
+    resolved_jpg_roots.sort();
+
+    let jpg_root = common_ancestor_path(&resolved_root_canonicals).with_context(|| {
+        format!(
+            "複数ファイル入力の共通ルートを特定できませんでした: {}件",
+            resolved_files.len()
+        )
+    })?;
+
+    Ok(ResolvedJpgInput {
+        jpg_root,
+        jpg_roots: resolved_jpg_roots,
+        jpg_files: resolved_files,
+        jpg_root_by_file,
+    })
+}
+
+fn resolve_raw_root_for_file(
     raw_input: Option<&PathBuf>,
     raw_from_jpg_parent_when_missing: bool,
-    jpg_root: &Path,
+    jpg_root_for_file: &Path,
 ) -> Option<PathBuf> {
     if let Some(raw_input) = raw_input {
         return Some(raw_input.clone());
@@ -287,7 +456,32 @@ fn resolve_effective_raw_input(
         return None;
     }
 
-    jpg_root.parent().map(PathBuf::from)
+    jpg_root_for_file.parent().map(PathBuf::from)
+}
+
+fn common_ancestor_path(paths: &[PathBuf]) -> Option<PathBuf> {
+    let first = paths.first()?;
+    let first_components: Vec<_> = first.components().collect();
+    let mut prefix_len = first_components.len();
+
+    for path in paths.iter().skip(1) {
+        let components: Vec<_> = path.components().collect();
+        let max = prefix_len.min(components.len());
+        let mut matched = 0usize;
+        while matched < max && first_components[matched] == components[matched] {
+            matched += 1;
+        }
+        prefix_len = matched;
+        if prefix_len == 0 {
+            return None;
+        }
+    }
+
+    let mut out = PathBuf::new();
+    for component in first_components.iter().take(prefix_len) {
+        out.push(component.as_os_str());
+    }
+    Some(out)
 }
 
 pub fn render_preview_sample(
@@ -632,7 +826,10 @@ fn file_modified_to_local(path: &Path) -> Option<DateTime<Local>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{generate_plan, merge_with_jpg_fallback, metadata_source_label, PlanOptions};
+    use super::{
+        generate_plan, generate_plan_for_jpg_files, merge_with_jpg_fallback, metadata_source_label,
+        PlanOptions,
+    };
     use crate::metadata::{MetadataSource, PartialMetadata};
     use std::fs;
     use std::path::PathBuf;
@@ -922,7 +1119,10 @@ mod tests {
         })
         .expect("plan generation should succeed");
 
-        assert_eq!(plan.jpg_root, jpg_root);
+        assert_eq!(
+            fs::canonicalize(&plan.jpg_root).expect("canonical plan root"),
+            fs::canonicalize(&jpg_root).expect("canonical jpg root")
+        );
     }
 
     #[test]
@@ -960,6 +1160,144 @@ mod tests {
         assert_eq!(c.metadata_source, MetadataSource::Xmp);
         assert_eq!(c.source_label, "xmp");
         assert_eq!(c.metadata.camera_make.as_deref(), Some("FUJIFILM"));
+    }
+
+    #[test]
+    fn generate_plan_for_jpg_files_targets_only_selected_files() {
+        let temp = tempdir().expect("tempdir");
+        let jpg_root = temp.path().join("jpg");
+        fs::create_dir_all(&jpg_root).expect("jpg root");
+        let a = jpg_root.join("A.JPG");
+        let b = jpg_root.join("B.JPG");
+        let c = jpg_root.join("C.JPG");
+        fs::write(&a, b"a").expect("write a");
+        fs::write(&b, b"b").expect("write b");
+        fs::write(&c, b"c").expect("write c");
+
+        let plan = generate_plan_for_jpg_files(
+            &PlanOptions {
+                jpg_input: jpg_root.clone(),
+                raw_input: None,
+                raw_from_jpg_parent_when_missing: false,
+                recursive: false,
+                include_hidden: false,
+                template: "{orig_name}".to_string(),
+                dedupe_same_maker: true,
+                exclusions: Vec::new(),
+                max_filename_len: 240,
+            },
+            &[c.clone(), a.clone()],
+        )
+        .expect("plan generation should succeed");
+
+        assert_eq!(
+            fs::canonicalize(&plan.jpg_root).expect("canonical plan root"),
+            fs::canonicalize(&jpg_root).expect("canonical jpg root")
+        );
+        assert_eq!(plan.jpg_roots, vec![jpg_root.clone()]);
+        assert_eq!(plan.candidates.len(), 2);
+        assert_eq!(plan.stats.scanned_files, 2);
+        assert_eq!(plan.stats.jpg_files, 2);
+        assert_eq!(plan.candidates[0].original_path, a);
+        assert_eq!(plan.candidates[1].original_path, c);
+    }
+
+    #[test]
+    fn generate_plan_for_jpg_files_supports_cross_folder_inputs() {
+        let temp = tempdir().expect("tempdir");
+        let folder_a = temp.path().join("session").join("a");
+        let folder_b = temp.path().join("session").join("b");
+        fs::create_dir_all(&folder_a).expect("folder a");
+        fs::create_dir_all(&folder_b).expect("folder b");
+        let jpg_a = folder_a.join("A.JPG");
+        let jpg_b = folder_b.join("B.JPG");
+        fs::write(&jpg_a, b"a").expect("write a");
+        fs::write(&jpg_b, b"b").expect("write b");
+
+        let plan = generate_plan_for_jpg_files(
+            &PlanOptions {
+                jpg_input: folder_a.clone(),
+                raw_input: None,
+                raw_from_jpg_parent_when_missing: false,
+                recursive: false,
+                include_hidden: false,
+                template: "{orig_name}".to_string(),
+                dedupe_same_maker: true,
+                exclusions: Vec::new(),
+                max_filename_len: 240,
+            },
+            &[jpg_a.clone(), jpg_b.clone()],
+        )
+        .expect("cross-folder files should be accepted");
+
+        assert_eq!(
+            plan.jpg_root,
+            fs::canonicalize(temp.path().join("session")).expect("canonical session root")
+        );
+        assert_eq!(plan.jpg_roots, vec![folder_a, folder_b]);
+        assert_eq!(plan.candidates.len(), 2);
+        assert_eq!(plan.candidates[0].original_path, jpg_a);
+        assert_eq!(plan.candidates[1].original_path, jpg_b);
+    }
+
+    #[test]
+    fn generate_plan_for_jpg_files_raw_parent_uses_each_jpg_parent() {
+        let temp = tempdir().expect("tempdir");
+        let session_a = temp.path().join("session-a");
+        let session_b = temp.path().join("session-b");
+        let folder_a = session_a.join("jpg");
+        let folder_b = session_b.join("jpg");
+        fs::create_dir_all(&folder_a).expect("folder a");
+        fs::create_dir_all(&folder_b).expect("folder b");
+
+        let jpg_a = folder_a.join("A.JPG");
+        let jpg_b = folder_b.join("B.JPG");
+        fs::write(&jpg_a, b"a").expect("write a");
+        fs::write(&jpg_b, b"b").expect("write b");
+
+        fs::write(
+            session_a.join("A.xmp"),
+            r#"<x:xmpmeta><rdf:RDF><rdf:Description><exif:DateTimeOriginal>2026:02:08 10:20:30</exif:DateTimeOriginal><exif:Make>FUJIFILM</exif:Make></rdf:Description></rdf:RDF></x:xmpmeta>"#,
+        )
+        .expect("xmp a");
+        fs::write(
+            session_b.join("B.xmp"),
+            r#"<x:xmpmeta><rdf:RDF><rdf:Description><exif:DateTimeOriginal>2026:02:08 10:20:30</exif:DateTimeOriginal><exif:Make>SONY</exif:Make></rdf:Description></rdf:RDF></x:xmpmeta>"#,
+        )
+        .expect("xmp b");
+
+        let plan = generate_plan_for_jpg_files(
+            &PlanOptions {
+                jpg_input: folder_a.clone(),
+                raw_input: None,
+                raw_from_jpg_parent_when_missing: true,
+                recursive: false,
+                include_hidden: false,
+                template: "{camera_maker}_{orig_name}".to_string(),
+                dedupe_same_maker: true,
+                exclusions: Vec::new(),
+                max_filename_len: 240,
+            },
+            &[jpg_a.clone(), jpg_b.clone()],
+        )
+        .expect("plan should use per-file raw parent");
+
+        assert_eq!(plan.candidates.len(), 2);
+        let cand_a = plan
+            .candidates
+            .iter()
+            .find(|candidate| candidate.original_path == jpg_a)
+            .expect("candidate a");
+        assert_eq!(cand_a.source_label, "xmp");
+        assert_eq!(cand_a.metadata.camera_make.as_deref(), Some("FUJIFILM"));
+
+        let cand_b = plan
+            .candidates
+            .iter()
+            .find(|candidate| candidate.original_path == jpg_b)
+            .expect("candidate b");
+        assert_eq!(cand_b.source_label, "xmp");
+        assert_eq!(cand_b.metadata.camera_make.as_deref(), Some("SONY"));
     }
 
     #[test]

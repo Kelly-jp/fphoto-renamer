@@ -1,7 +1,7 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
 
-rem Lightroom 後処理用: 第1引数で書き出し先（ファイルまたはフォルダ）が渡される想定
+rem Lightroom 後処理用: 1つ以上の書き出し先（ファイルまたはフォルダ）が渡される想定
 
 rem この .bat ファイルが置かれているディレクトリ
 set "SCRIPT_DIR=%~dp0"
@@ -37,29 +37,48 @@ rem set "FPHOTO_EXIFTOOL_PATH=C:\tools\exiftool\exiftool.exe"
 rem -----------------------------------
 
 if "%~1"=="" (
-  echo Usage: %~nx0 ^<exported_path^>
+  echo Usage: %~nx0 ^<exported_path...^>
   exit /b 2
 )
 
 rem Lightroom から渡される引数（書き出し先ファイル/フォルダ）
-set "INPUT_PATH=%~1"
-set "JPG_INPUT="
+set "JPG_INPUT_ARGS="
 set "OPEN_PATH="
+set "HAS_DIRECTORY_INPUT=0"
+set "INPUT_COUNT=0"
 
-rem フォルダが渡された場合はそのまま、ファイルが渡された場合もファイルパスのままCLIへ渡す
+:collect_inputs
+if "%~1"=="" goto inputs_ready
+
+set /a INPUT_COUNT+=1
+set "INPUT_PATH=%~1"
+
 if exist "%INPUT_PATH%\*" (
-  set "JPG_INPUT=%INPUT_PATH%"
+  if not "!INPUT_COUNT!"=="1" (
+    echo Folder input cannot be combined with other inputs: "%INPUT_PATH%"
+    exit /b 3
+  )
+  set "HAS_DIRECTORY_INPUT=1"
+  set "JPG_INPUT_ARGS=!JPG_INPUT_ARGS! --jpg-input ""%INPUT_PATH%"""
   set "OPEN_PATH=%INPUT_PATH%"
 ) else (
   if exist "%INPUT_PATH%" (
-    set "JPG_INPUT=%INPUT_PATH%"
-    for %%I in ("%INPUT_PATH%") do set "OPEN_PATH=%%~dpI"
+    if "!HAS_DIRECTORY_INPUT!"=="1" (
+      echo Folder input cannot be combined with file inputs: "%INPUT_PATH%"
+      exit /b 3
+    )
+    set "JPG_INPUT_ARGS=!JPG_INPUT_ARGS! --jpg-input ""%INPUT_PATH%"""
+    if not defined OPEN_PATH for %%I in ("%INPUT_PATH%") do set "OPEN_PATH=%%~dpI"
   ) else (
     echo Input path not found: "%INPUT_PATH%"
     exit /b 3
   )
 )
 
+shift
+goto collect_inputs
+
+:inputs_ready
 if not exist "%CLI_BIN%" (
   echo Release CLI not found. Building...
   pushd "%PROJECT_ROOT%" || exit /b 4
@@ -87,11 +106,11 @@ if defined EXCLUDE3 set "EXCLUDE_ARGS=!EXCLUDE_ARGS! --exclude ""!EXCLUDE3!"""
 if defined EXCLUDE4 set "EXCLUDE_ARGS=!EXCLUDE_ARGS! --exclude ""!EXCLUDE4!"""
 
 echo Running:
-echo "%CLI_BIN%" rename --jpg-input "%JPG_INPUT%" --template "%TEMPLATE%" --output table --apply %RAW_PARENT_ARG% %DEDUPE_ARG% %BACKUP_ARG% %EXCLUDE_ARGS%
+echo "%CLI_BIN%" rename !JPG_INPUT_ARGS! --template "%TEMPLATE%" --output table --apply %RAW_PARENT_ARG% %DEDUPE_ARG% %BACKUP_ARG% %EXCLUDE_ARGS%
 echo.
 
 call "%CLI_BIN%" rename ^
-  --jpg-input "%JPG_INPUT%" ^
+  !JPG_INPUT_ARGS! ^
   --template "%TEMPLATE%" ^
   --output table ^
   --apply ^

@@ -1,9 +1,9 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::ArgAction;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use fphoto_renamer_core::{
-    app_paths, apply_plan_with_options, generate_plan, load_config, parse_template, undo_last,
-    ApplyOptions, PlanOptions, DEFAULT_TEMPLATE,
+    app_paths, apply_plan_with_options, generate_plan, generate_plan_for_jpg_files, load_config,
+    parse_template, undo_last, ApplyOptions, PlanOptions, DEFAULT_TEMPLATE,
 };
 use std::path::PathBuf;
 
@@ -38,8 +38,8 @@ enum ConfigAction {
 
 #[derive(Debug, Args)]
 struct RenameArgs {
-    #[arg(long)]
-    jpg_input: String,
+    #[arg(long, required = true, num_args = 1..)]
+    jpg_input: Vec<String>,
     #[arg(long)]
     raw_input: Option<String>,
     #[arg(long, default_value_t = false)]
@@ -83,8 +83,14 @@ fn cmd_rename(args: RenameArgs) -> Result<()> {
     configure_exiftool_path();
     parse_template(&args.template)?;
 
+    let jpg_inputs: Vec<PathBuf> = args.jpg_input.iter().map(PathBuf::from).collect();
+    let primary_jpg_input = jpg_inputs
+        .first()
+        .cloned()
+        .context("--jpg-input を最低1件指定してください")?;
+
     let options = PlanOptions {
-        jpg_input: args.jpg_input.into(),
+        jpg_input: primary_jpg_input,
         raw_input: args.raw_input.map(Into::into),
         raw_from_jpg_parent_when_missing: args.raw_parent_if_missing,
         recursive: false,
@@ -95,7 +101,11 @@ fn cmd_rename(args: RenameArgs) -> Result<()> {
         max_filename_len: 240,
     };
 
-    let plan = generate_plan(&options)?;
+    let plan = if jpg_inputs.len() == 1 {
+        generate_plan(&options)?
+    } else {
+        generate_plan_for_jpg_files(&options, &jpg_inputs)?
+    };
 
     match args.output {
         OutputFormat::Json => {
@@ -258,7 +268,7 @@ mod tests {
 
         match cli.command {
             Commands::Rename(args) => {
-                assert_eq!(args.jpg_input, "/tmp/jpg");
+                assert_eq!(args.jpg_input, vec!["/tmp/jpg".to_string()]);
                 assert_eq!(args.raw_input, None);
                 assert!(!args.raw_parent_if_missing);
                 assert!(!args.apply);
@@ -298,6 +308,7 @@ mod tests {
 
         match cli.command {
             Commands::Rename(args) => {
+                assert_eq!(args.jpg_input, vec!["/tmp/jpg".to_string()]);
                 assert_eq!(args.raw_input.as_deref(), Some("/tmp/raw"));
                 assert!(args.raw_parent_if_missing);
                 assert!(args.apply);
@@ -327,6 +338,36 @@ mod tests {
             rendered.contains("invalid value"),
             "unexpected parse error: {rendered}"
         );
+    }
+
+    #[test]
+    fn parse_rename_accepts_multiple_jpg_inputs() {
+        let cli = Cli::try_parse_from([
+            "fphoto-renamer-cli",
+            "rename",
+            "--jpg-input",
+            "/tmp/a.JPG",
+            "--jpg-input",
+            "/tmp/b.JPG",
+        ])
+        .expect("parse should succeed");
+
+        match cli.command {
+            Commands::Rename(args) => {
+                assert_eq!(
+                    args.jpg_input,
+                    vec!["/tmp/a.JPG".to_string(), "/tmp/b.JPG".to_string()]
+                );
+            }
+            _ => panic!("rename command expected"),
+        }
+    }
+
+    #[test]
+    fn parse_rename_missing_jpg_input_fails() {
+        let err = Cli::try_parse_from(["fphoto-renamer-cli", "rename"])
+            .expect_err("missing --jpg-input should fail");
+        assert_eq!(err.kind(), ErrorKind::MissingRequiredArgument);
     }
 
     #[test]

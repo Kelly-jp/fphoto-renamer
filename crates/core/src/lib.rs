@@ -16,7 +16,8 @@ pub use config::{app_paths, load_config, save_config, AppConfig, AppPaths};
 pub use constants::DEFAULT_TEMPLATE;
 pub use metadata::{MetadataSource, PhotoMetadata};
 pub use planner::{
-    generate_plan, render_preview_sample, PlanOptions, RenameCandidate, RenamePlan, RenameStats,
+    generate_plan, generate_plan_for_jpg_files, render_preview_sample, PlanOptions,
+    RenameCandidate, RenamePlan, RenameStats,
 };
 pub use template::{
     parse_template, render_template, render_template_with_options, validate_template,

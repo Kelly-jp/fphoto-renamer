@@ -69,6 +69,8 @@ CLI:
 cargo run -p fphoto-renamer-cli -- rename --jpg-input /path/to/jpg
 # 単一JPG/JPEGファイルを対象にする場合
 cargo run -p fphoto-renamer-cli -- rename --jpg-input /path/to/jpg/DSC00001.JPG
+# 複数JPG/JPEGファイルを対象にする場合（異なるフォルダでも可）
+cargo run -p fphoto-renamer-cli -- rename --jpg-input /path/to/a/DSC00001.JPG --jpg-input /path/to/b/DSC00002.JPG
 ```
 
 GUI:
@@ -84,6 +86,7 @@ CLI:
 ```bash
 ./target/release/fphoto-renamer-cli rename --jpg-input /path/to/jpg
 ./target/release/fphoto-renamer-cli rename --jpg-input /path/to/jpg/DSC00001.JPG
+./target/release/fphoto-renamer-cli rename --jpg-input /path/to/a/DSC00001.JPG --jpg-input /path/to/b/DSC00002.JPG
 ```
 
 GUI:
@@ -97,12 +100,13 @@ Windows (PowerShell) の例:
 ```powershell
 .\target\release\fphoto-renamer-cli.exe rename --jpg-input C:\path\to\jpg
 .\target\release\fphoto-renamer-cli.exe rename --jpg-input C:\path\to\jpg\DSC00001.JPG
+.\target\release\fphoto-renamer-cli.exe rename --jpg-input C:\path\to\a\DSC00001.JPG --jpg-input C:\path\to\b\DSC00002.JPG
 .\target\release\fphoto-renamer-gui.exe
 ```
 
 ## 機能
 
-- CLI の `--jpg-input` はフォルダまたは単一JPG/JPEGファイルを受け付け、RAW フォルダは任意
+- CLI の `--jpg-input` はフォルダまたはJPG/JPEGファイルを受け付ける。複数指定時はJPG/JPEGファイルを複数渡せる（異なるフォルダでも可、RAW フォルダは任意）
 - RAW フォルダ指定時は同名ベースで探索し、優先順位は `XMP -> DNG -> RAF`
 - RAW フォルダを明示指定した場合、そのパスが存在しない/フォルダでないならエラー（JPG へはフォールバックしない）
 - RAW フォルダ未指定時に、JPG フォルダの1つ上の階層を RAW 探索ルートにするオプション（CLI/GUI）
@@ -124,7 +128,7 @@ Windows (PowerShell) の例:
 ## CLI
 
 `--tokens` / `--delimiter` は廃止済みです。`--template` を使用してください。
-`--jpg-input` はフォルダ・単一JPG/JPEGファイルのどちらでも指定できます。
+`--jpg-input` はフォルダ・単一JPG/JPEGファイルを指定できます。複数回指定する場合はJPG/JPEGファイルを指定し、異なるフォルダにある複数ファイルもまとめて処理できます。
 
 ```bash
 cargo run -p fphoto-renamer-cli -- rename \
@@ -143,6 +147,17 @@ cargo run -p fphoto-renamer-cli -- rename \
   --jpg-input /path/to/jpg/DSC00001.JPG \
   --raw-parent-if-missing
 ```
+
+複数ファイルを対象にする場合（異なるフォルダでも可）:
+
+```bash
+cargo run -p fphoto-renamer-cli -- rename \
+  --jpg-input /path/to/a/DSC00001.JPG \
+  --jpg-input /path/to/b/DSC00002.JPG \
+  --raw-parent-if-missing
+```
+
+複数ファイル指定で親フォルダが複数になる場合、`--raw-parent-if-missing` は各JPGファイルごとに `JPG親フォルダの1つ上` を RAW 探索ルートとして解決します。共通の RAW ルートを使いたい場合は `--raw-input` を明示指定してください。
 
 RAW フォルダを省略し、JPG 親フォルダを RAW 探索ルートとして使う場合:
 
