@@ -60,7 +60,12 @@ fn pick_film_simulation(xml: &str, values: &HashMap<String, String>) -> Option<S
 
     let raw = pick_value(
         values,
-        &["lookname", "filmsimulation", "filmmode", "filmsimulationname"],
+        &[
+            "lookname",
+            "filmsimulation",
+            "filmmode",
+            "filmsimulationname",
+        ],
     )?;
     normalize_film_simulation_value(&raw)
 }
