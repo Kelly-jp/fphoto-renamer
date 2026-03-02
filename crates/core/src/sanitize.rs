@@ -61,13 +61,14 @@ pub fn sanitize_filename(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     for ch in value.chars() {
         if is_disallowed_char(ch) {
-            out.push('_');
+            continue;
         } else {
             out.push(ch);
         }
     }
 
-    let mut out = out.trim_end_matches([' ', '.']).trim().to_string();
+    let mut out = cleanup_filename(&out);
+    out = out.trim_end_matches([' ', '.']).trim().to_string();
 
     if out.is_empty() {
         out = "untitled".to_string();
@@ -346,6 +347,12 @@ mod tests {
     fn sanitize_handles_disallowed_chars() {
         let value = sanitize_filename("AUX");
         assert_eq!(value, "AUX_file");
+    }
+
+    #[test]
+    fn sanitize_removes_disallowed_chars_without_extra_separator() {
+        let value = sanitize_filename("17-40mm-F1.8-DC-|-Art-025");
+        assert_eq!(value, "17-40mm-F1.8-DC-Art-025");
     }
 
     #[test]

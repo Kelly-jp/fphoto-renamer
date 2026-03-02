@@ -14,6 +14,7 @@ const TARGET_XMP_KEYS: &[&str] = &[
     "lensmake",
     "lensmodel",
     "lens",
+    "lookname",
     "filmsimulation",
     "filmmode",
     "filmsimulationname",
@@ -31,10 +32,7 @@ pub fn read_xmp_metadata(path: &Path) -> Result<PartialMetadata> {
     let camera_model = pick_value(&values, &["model"]);
     let lens_make = pick_value(&values, &["lensmake"]);
     let lens_model = pick_value(&values, &["lensmodel", "lens"]);
-    let film_sim = pick_value(
-        &values,
-        &["filmsimulation", "filmmode", "filmsimulationname"],
-    );
+    let film_sim = pick_film_simulation(&xml, &values);
 
     Ok(PartialMetadata {
         date,
@@ -51,6 +49,95 @@ fn pick_value(values: &HashMap<String, String>, keys: &[&str]) -> Option<String>
         if let Some(value) = values.get(*key) {
             return Some(value.clone());
         }
+    }
+    None
+}
+
+fn pick_film_simulation(xml: &str, values: &HashMap<String, String>) -> Option<String> {
+    if let Some(look_name) = extract_crs_look_name(xml) {
+        return Some(look_name);
+    }
+
+    let raw = pick_value(
+        values,
+        &["lookname", "filmsimulation", "filmmode", "filmsimulationname"],
+    )?;
+    normalize_film_simulation_value(&raw)
+}
+
+fn normalize_film_simulation_value(raw: &str) -> Option<String> {
+    let text = raw.trim().trim_matches('"');
+    if text.is_empty() {
+        return None;
+    }
+
+    let normalized = text
+        .split_once(' ')
+        .and_then(|(head, tail)| {
+            if head.eq_ignore_ascii_case("camera") {
+                Some(tail.trim())
+            } else {
+                None
+            }
+        })
+        .unwrap_or(text)
+        .trim();
+    if normalized.is_empty() {
+        return None;
+    }
+
+    Some(normalized.to_string())
+}
+
+fn extract_crs_look_name(xml: &str) -> Option<String> {
+    if let Some(look_name) = extract_attribute_value(xml, "crs:LookName")
+        .and_then(|raw| normalize_film_simulation_value(&raw))
+    {
+        return Some(look_name);
+    }
+
+    let mut cursor = 0usize;
+    let close_tag = "</crs:Look>";
+    while let Some(open_rel) = xml[cursor..].find("<crs:Look") {
+        let open = cursor + open_rel;
+        let Some(close_rel) = xml[open..].find(close_tag) else {
+            break;
+        };
+        let close = open + close_rel;
+        let block = &xml[open..close];
+
+        if let Some(look_name) = extract_attribute_value(block, "crs:Name")
+            .and_then(|raw| normalize_film_simulation_value(&raw))
+        {
+            return Some(look_name);
+        }
+
+        cursor = close + close_tag.len();
+    }
+
+    None
+}
+
+fn extract_attribute_value(haystack: &str, attr_name: &str) -> Option<String> {
+    let mut cursor = 0usize;
+    while let Some(rel) = haystack[cursor..].find(attr_name) {
+        let start = cursor + rel;
+        let value_start = start + attr_name.len();
+        let mut tail = &haystack[value_start..];
+        tail = tail.trim_start();
+        if !tail.starts_with('=') {
+            cursor = value_start;
+            continue;
+        }
+        tail = tail[1..].trim_start();
+        let quote = tail.chars().next()?;
+        if quote != '"' && quote != '\'' {
+            cursor = value_start;
+            continue;
+        }
+        let inner = &tail[quote.len_utf8()..];
+        let end = inner.find(quote)?;
+        return Some(inner[..end].to_string());
     }
     None
 }
@@ -275,5 +362,47 @@ mod tests {
         assert_eq!(meta.camera_make.as_deref(), Some("FUJIFILM"));
         assert_eq!(meta.lens_model.as_deref(), Some("XF16-55mm F2.8"));
         assert!(meta.date.is_some());
+    }
+
+    #[test]
+    fn read_xmp_metadata_prefers_lookname_for_film_sim() {
+        let temp = tempdir().expect("tempdir");
+        let xmp_path = temp.path().join("IMG_0003.xmp");
+        fs::write(
+            &xmp_path,
+            r#"<x:xmpmeta><rdf:RDF><rdf:Description crs:LookName="Camera CLASSIC Neg" exif:FilmSimulation="PROVIA" xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/" xmlns:exif="http://ns.adobe.com/exif/1.0/" /></rdf:RDF></x:xmpmeta>"#,
+        )
+        .expect("write xmp");
+
+        let meta = read_xmp_metadata(&xmp_path).expect("read xmp");
+        assert_eq!(meta.film_sim.as_deref(), Some("CLASSIC Neg"));
+    }
+
+    #[test]
+    fn read_xmp_metadata_prefers_crs_look_block_name_for_film_sim() {
+        let temp = tempdir().expect("tempdir");
+        let xmp_path = temp.path().join("IMG_0005.xmp");
+        fs::write(
+            &xmp_path,
+            r#"<x:xmpmeta><rdf:RDF><rdf:Description xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/" xmlns:exif="http://ns.adobe.com/exif/1.0/" exif:FilmSimulationName="Classic Chrome"><crs:Look><rdf:Description crs:Name="Camera CLASSIC Neg" /></crs:Look></rdf:Description></rdf:RDF></x:xmpmeta>"#,
+        )
+        .expect("write xmp");
+
+        let meta = read_xmp_metadata(&xmp_path).expect("read xmp");
+        assert_eq!(meta.film_sim.as_deref(), Some("CLASSIC Neg"));
+    }
+
+    #[test]
+    fn read_xmp_metadata_uses_film_simulation_when_lookname_missing() {
+        let temp = tempdir().expect("tempdir");
+        let xmp_path = temp.path().join("IMG_0004.xmp");
+        fs::write(
+            &xmp_path,
+            r#"<x:xmpmeta><rdf:RDF><rdf:Description exif:FilmSimulationName="Classic Chrome" xmlns:exif="http://ns.adobe.com/exif/1.0/" /></rdf:RDF></x:xmpmeta>"#,
+        )
+        .expect("write xmp");
+
+        let meta = read_xmp_metadata(&xmp_path).expect("read xmp");
+        assert_eq!(meta.film_sim.as_deref(), Some("Classic Chrome"));
     }
 }
