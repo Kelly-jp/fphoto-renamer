@@ -92,19 +92,42 @@ extract_zip_archive() {
   tar -xf "$archive_path" -C "$dest_dir"
 }
 
+download_with_fallback() {
+  local output_path="$1"
+  shift
+
+  local url=""
+  for url in "$@"; do
+    echo "Attempting download: ${url}"
+    if curl -fsSL "$url" -o "$output_path"; then
+      return 0
+    fi
+  done
+
+  echo "failed to download archive from all candidate URLs" >&2
+  return 1
+}
+
 prepare_unix_bundle() {
   local os_name="$1"
   local version="$2"
   local repo_root="$3"
   local destination_dir="$repo_root/crates/gui/src-tauri/resources/bin/${os_name}"
-  local archive_url="https://exiftool.org/Image-ExifTool-${version}.tar.gz"
   local work_dir
   work_dir="$(mktemp -d)"
+  local archive_path="$work_dir/exiftool.tar.gz"
 
   clean_bundle_dir "$destination_dir"
 
-  curl -fsSL "$archive_url" -o "$work_dir/exiftool.tar.gz"
-  tar -xzf "$work_dir/exiftool.tar.gz" -C "$work_dir"
+  if ! download_with_fallback \
+    "$archive_path" \
+    "https://exiftool.org/Image-ExifTool-${version}.tar.gz" \
+    "https://sourceforge.net/projects/exiftool/files/Image-ExifTool-${version}.tar.gz/download"; then
+    cleanup_temp_dir "$work_dir"
+    exit 1
+  fi
+
+  tar -xzf "$archive_path" -C "$work_dir"
 
   local extracted_dir
   extracted_dir="$(
@@ -138,14 +161,21 @@ prepare_windows_bundle() {
   local version="$1"
   local repo_root="$2"
   local destination_dir="$repo_root/crates/gui/src-tauri/resources/bin/windows"
-  local archive_url="https://exiftool.org/exiftool-${version}_64.zip"
   local work_dir
   work_dir="$(mktemp -d)"
+  local archive_path="$work_dir/exiftool.zip"
 
   clean_bundle_dir "$destination_dir"
 
-  curl -fsSL "$archive_url" -o "$work_dir/exiftool.zip"
-  extract_zip_archive "$work_dir/exiftool.zip" "$work_dir"
+  if ! download_with_fallback \
+    "$archive_path" \
+    "https://exiftool.org/exiftool-${version}_64.zip" \
+    "https://sourceforge.net/projects/exiftool/files/exiftool-${version}_64.zip/download"; then
+    cleanup_temp_dir "$work_dir"
+    exit 1
+  fi
+
+  extract_zip_archive "$archive_path" "$work_dir"
 
   local source_file
   source_file="$(
