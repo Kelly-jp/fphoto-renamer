@@ -25,6 +25,7 @@ EXCLUDES=(
   "-強化-NR"
   "-DxO_DeepPRIME XD2s_XD"
   "-DxO_DeepPRIME 3"
+  "-DxO_DeepPRIME XD3"
   "-DxO_DeepPRIME XD3 X-Trans"
 )
 # ExifTool の実行パスを固定したい場合のみ有効化

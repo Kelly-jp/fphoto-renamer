@@ -4,11 +4,22 @@ const WINDOWS_RESERVED_NAMES: &[&str] = &[
 ];
 
 pub fn apply_exclusions(mut value: String, exclusions: &[String]) -> String {
-    for exclusion in exclusions {
-        let term = exclusion.trim();
-        if term.is_empty() {
-            continue;
-        }
+    let mut terms = exclusions
+        .iter()
+        .map(|exclusion| exclusion.trim())
+        .filter(|term| !term.is_empty())
+        .collect::<Vec<_>>();
+
+    // Remove more specific suffixes before their prefixes to avoid partial leftovers.
+    terms.sort_by(|left, right| {
+        right
+            .chars()
+            .count()
+            .cmp(&left.chars().count())
+            .then_with(|| left.cmp(right))
+    });
+
+    for term in terms {
         for variant in build_exclusion_variants(term) {
             value = replace_case_insensitive(&value, &variant);
         }
@@ -426,12 +437,13 @@ mod tests {
     #[test]
     fn exclusions_can_remove_user_provided_dxo_suffixes() {
         let value = apply_exclusions(
-            "IMG0001-強化-NR-DxO_DeepPRIME-XD2s_XD-DxO_DeepPRIME-3-DxO_DeepPRIME-XD3-X-Trans"
+            "IMG0001-強化-NR-DxO_DeepPRIME-XD2s_XD-DxO_DeepPRIME-3-DxO_DeepPRIME-XD3-DxO_DeepPRIME-XD3-X-Trans"
                 .to_string(),
             &[
                 "-強化-NR".to_string(),
                 "-DxO_DeepPRIME XD2s_XD".to_string(),
                 "-DxO_DeepPRIME 3".to_string(),
+                "-DxO_DeepPRIME XD3".to_string(),
                 "-DxO_DeepPRIME XD3 X-Trans".to_string(),
             ],
         );
