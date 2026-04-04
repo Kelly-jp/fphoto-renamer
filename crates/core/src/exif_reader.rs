@@ -199,7 +199,7 @@ fn pick_film_simulation_from_json(json: &JsonValue) -> Option<String> {
     None
 }
 
-fn normalize_film_simulation_from_camera_profile(raw: &str) -> Option<String> {
+pub(crate) fn normalize_film_simulation_from_camera_profile(raw: &str) -> Option<String> {
     let text = raw.trim().trim_matches('"');
     if text.is_empty() {
         return None;

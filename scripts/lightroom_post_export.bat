@@ -30,7 +30,8 @@ rem ファイル名から削除したい文字列（--exclude として複数指
 set "EXCLUDE1=-強化-NR"
 set "EXCLUDE2=-DxO_DeepPRIME XD2s_XD"
 set "EXCLUDE3=-DxO_DeepPRIME 3"
-set "EXCLUDE4=-DxO_DeepPRIME XD3 X-Trans"
+set "EXCLUDE4=-DxO_DeepPRIME XD3"
+set "EXCLUDE5=-DxO_DeepPRIME XD3 X-Trans"
 
 rem ExifTool の実行パスを固定したい場合のみ有効化
 rem set "FPHOTO_EXIFTOOL_PATH=C:\tools\exiftool\exiftool.exe"
@@ -104,6 +105,7 @@ if defined EXCLUDE1 set "EXCLUDE_ARGS=!EXCLUDE_ARGS! --exclude ""!EXCLUDE1!"""
 if defined EXCLUDE2 set "EXCLUDE_ARGS=!EXCLUDE_ARGS! --exclude ""!EXCLUDE2!"""
 if defined EXCLUDE3 set "EXCLUDE_ARGS=!EXCLUDE_ARGS! --exclude ""!EXCLUDE3!"""
 if defined EXCLUDE4 set "EXCLUDE_ARGS=!EXCLUDE_ARGS! --exclude ""!EXCLUDE4!"""
+if defined EXCLUDE5 set "EXCLUDE_ARGS=!EXCLUDE_ARGS! --exclude ""!EXCLUDE5!"""
 
 echo Running:
 echo "%CLI_BIN%" rename !JPG_INPUT_ARGS! --template "%TEMPLATE%" --output table --apply %RAW_PARENT_ARG% %DEDUPE_ARG% %BACKUP_ARG% %EXCLUDE_ARGS%

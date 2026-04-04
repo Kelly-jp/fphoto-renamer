@@ -4,11 +4,22 @@ const WINDOWS_RESERVED_NAMES: &[&str] = &[
 ];
 
 pub fn apply_exclusions(mut value: String, exclusions: &[String]) -> String {
-    for exclusion in exclusions {
-        let term = exclusion.trim();
-        if term.is_empty() {
-            continue;
-        }
+    let mut terms = exclusions
+        .iter()
+        .map(|exclusion| exclusion.trim())
+        .filter(|term| !term.is_empty())
+        .collect::<Vec<_>>();
+
+    // Remove more specific suffixes before their prefixes to avoid partial leftovers.
+    terms.sort_by(|left, right| {
+        right
+            .chars()
+            .count()
+            .cmp(&left.chars().count())
+            .then_with(|| left.cmp(right))
+    });
+
+    for term in terms {
         for variant in build_exclusion_variants(term) {
             value = replace_case_insensitive(&value, &variant);
         }
@@ -38,19 +49,23 @@ pub fn normalize_spaces_to_underscore(value: &str) -> String {
 
 pub fn cleanup_filename(value: &str) -> String {
     let mut out = String::new();
-    let mut prev_sep: Option<char> = None;
+    let mut pending_sep: Option<char> = None;
 
     for ch in value.chars() {
         if is_collapse_separator(ch) {
-            if prev_sep == Some(ch) {
-                continue;
-            }
-            prev_sep = Some(ch);
-            out.push(ch);
-        } else {
-            prev_sep = None;
-            out.push(ch);
+            pending_sep = Some(preferred_separator(pending_sep, ch));
+            continue;
         }
+
+        if let Some(separator) = pending_sep.take() {
+            out.push(separator);
+        }
+
+        out.push(ch);
+    }
+
+    if let Some(separator) = pending_sep {
+        out.push(separator);
     }
 
     out.trim_matches(|c: char| c == '_' || c == '-' || c == ' ' || c == '.')
@@ -310,6 +325,22 @@ fn is_collapse_separator(ch: char) -> bool {
     matches!(ch, '_' | '-' | ' ')
 }
 
+fn preferred_separator(current: Option<char>, next: char) -> char {
+    match current {
+        Some(existing) if separator_rank(existing) >= separator_rank(next) => existing,
+        _ => next,
+    }
+}
+
+fn separator_rank(ch: char) -> u8 {
+    match ch {
+        '-' => 3,
+        '_' => 2,
+        ' ' => 1,
+        _ => 0,
+    }
+}
+
 fn is_disallowed_char(ch: char) -> bool {
     matches!(ch, '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|')
         || ch == '\0'
@@ -344,6 +375,12 @@ mod tests {
     }
 
     #[test]
+    fn cleanup_compacts_mixed_separators_using_hyphen_preference() {
+        let value = cleanup_filename("DC-_-Art");
+        assert_eq!(value, "DC-Art");
+    }
+
+    #[test]
     fn sanitize_handles_disallowed_chars() {
         let value = sanitize_filename("AUX");
         assert_eq!(value, "AUX_file");
@@ -353,6 +390,12 @@ mod tests {
     fn sanitize_removes_disallowed_chars_without_extra_separator() {
         let value = sanitize_filename("17-40mm-F1.8-DC-|-Art-025");
         assert_eq!(value, "17-40mm-F1.8-DC-Art-025");
+    }
+
+    #[test]
+    fn sanitize_removes_disallowed_chars_and_compacts_mixed_separators() {
+        let value = sanitize_filename("DC-|-Art");
+        assert_eq!(value, "DC-Art");
     }
 
     #[test]
@@ -394,12 +437,13 @@ mod tests {
     #[test]
     fn exclusions_can_remove_user_provided_dxo_suffixes() {
         let value = apply_exclusions(
-            "IMG0001-強化-NR-DxO_DeepPRIME-XD2s_XD-DxO_DeepPRIME-3-DxO_DeepPRIME-XD3-X-Trans"
+            "IMG0001-強化-NR-DxO_DeepPRIME-XD2s_XD-DxO_DeepPRIME-3-DxO_DeepPRIME-XD3-DxO_DeepPRIME-XD3-X-Trans"
                 .to_string(),
             &[
                 "-強化-NR".to_string(),
                 "-DxO_DeepPRIME XD2s_XD".to_string(),
                 "-DxO_DeepPRIME 3".to_string(),
+                "-DxO_DeepPRIME XD3".to_string(),
                 "-DxO_DeepPRIME XD3 X-Trans".to_string(),
             ],
         );

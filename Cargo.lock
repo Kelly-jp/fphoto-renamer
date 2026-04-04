@@ -918,7 +918,7 @@ dependencies = [
 
 [[package]]
 name = "fphoto-renamer-cli"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "anyhow",
  "clap",
@@ -929,7 +929,7 @@ dependencies = [
 
 [[package]]
 name = "fphoto-renamer-gui"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "anyhow",
  "chrono",
@@ -943,7 +943,7 @@ dependencies = [
 
 [[package]]
 name = "fphoto_renamer_core"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "anyhow",
  "chrono",

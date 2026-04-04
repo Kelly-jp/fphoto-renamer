@@ -1,3 +1,4 @@
+use crate::exif_reader::normalize_film_simulation_from_camera_profile;
 use crate::metadata::PartialMetadata;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Local, NaiveDateTime, TimeZone};
@@ -58,14 +59,13 @@ fn pick_film_simulation(xml: &str, values: &HashMap<String, String>) -> Option<S
         return Some(look_name);
     }
 
+    if let Some(camera_profile) = extract_crs_camera_profile(xml) {
+        return Some(camera_profile);
+    }
+
     let raw = pick_value(
         values,
-        &[
-            "lookname",
-            "filmsimulation",
-            "filmmode",
-            "filmsimulationname",
-        ],
+        &["filmsimulation", "filmmode", "filmsimulationname"],
     )?;
     normalize_film_simulation_value(&raw)
 }
@@ -95,8 +95,8 @@ fn normalize_film_simulation_value(raw: &str) -> Option<String> {
 }
 
 fn extract_crs_look_name(xml: &str) -> Option<String> {
-    if let Some(look_name) = extract_attribute_value(xml, "crs:LookName")
-        .and_then(|raw| normalize_film_simulation_value(&raw))
+    if let Some(look_name) =
+        extract_tag_value(xml, "crs:LookName").and_then(|raw| normalize_film_simulation_value(&raw))
     {
         return Some(look_name);
     }
@@ -123,6 +123,24 @@ fn extract_crs_look_name(xml: &str) -> Option<String> {
     None
 }
 
+fn extract_crs_camera_profile(xml: &str) -> Option<String> {
+    for tag_name in ["crs:CameraProfile", "crs:CameraProfilesProfileName"] {
+        if let Some(profile) = extract_tag_value(xml, tag_name).and_then(|raw| {
+            normalize_film_simulation_from_camera_profile(&raw)
+                .or_else(|| normalize_film_simulation_value(&raw))
+        }) {
+            return Some(profile);
+        }
+    }
+
+    None
+}
+
+fn extract_tag_value(haystack: &str, tag_name: &str) -> Option<String> {
+    extract_attribute_value(haystack, tag_name)
+        .or_else(|| extract_element_text_value(haystack, tag_name))
+}
+
 fn extract_attribute_value(haystack: &str, attr_name: &str) -> Option<String> {
     let mut cursor = 0usize;
     while let Some(rel) = haystack[cursor..].find(attr_name) {
@@ -144,6 +162,38 @@ fn extract_attribute_value(haystack: &str, attr_name: &str) -> Option<String> {
         let end = inner.find(quote)?;
         return Some(inner[..end].to_string());
     }
+    None
+}
+
+fn extract_element_text_value(haystack: &str, tag_name: &str) -> Option<String> {
+    let mut cursor = 0usize;
+    let open_prefix = format!("<{}", tag_name);
+    let close_tag = format!("</{}>", tag_name);
+
+    while let Some(open_rel) = haystack[cursor..].find(&open_prefix) {
+        let open = cursor + open_rel;
+        let Some(tag_end_rel) = haystack[open..].find('>') else {
+            break;
+        };
+        let tag_end = open + tag_end_rel;
+        let raw_tag = &haystack[open + 1..tag_end];
+        if raw_tag.ends_with('/') {
+            cursor = tag_end + 1;
+            continue;
+        }
+
+        let Some(close_rel) = haystack[tag_end + 1..].find(&close_tag) else {
+            break;
+        };
+        let close = tag_end + 1 + close_rel;
+        let content = haystack[tag_end + 1..close].trim();
+        if !content.is_empty() {
+            return Some(html_unescape_basic(content));
+        }
+
+        cursor = close + close_tag.len();
+    }
+
     None
 }
 
@@ -409,5 +459,19 @@ mod tests {
 
         let meta = read_xmp_metadata(&xmp_path).expect("read xmp");
         assert_eq!(meta.film_sim.as_deref(), Some("Classic Chrome"));
+    }
+
+    #[test]
+    fn read_xmp_metadata_prefers_crs_camera_profile_over_crd_lookname() {
+        let temp = tempdir().expect("tempdir");
+        let xmp_path = temp.path().join("IMG_0006.xmp");
+        fs::write(
+            &xmp_path,
+            r#"<x:xmpmeta><rdf:RDF><rdf:Description xmlns:crd="http://ns.adobe.com/camera-raw-defaults/1.0/" xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/" crd:LookName="Camera NOSTALGIC Neg" crs:CameraProfile="Camera REALA ACE v2" /></rdf:RDF></x:xmpmeta>"#,
+        )
+        .expect("write xmp");
+
+        let meta = read_xmp_metadata(&xmp_path).expect("read xmp");
+        assert_eq!(meta.film_sim.as_deref(), Some("REALA ACE"));
     }
 }

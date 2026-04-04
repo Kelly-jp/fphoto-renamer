@@ -163,7 +163,8 @@ cargo run -p fphoto-renamer-cli -- rename \
   --raw-input /path/to/raw \
   --template "{year}{month}{day}_{hour}{minute}{second}_{camera_maker}_{camera_model}_{lens_maker}_{lens_model}_{film_sim}_{orig_name}" \
   --exclude "-強化-NR" \
-  --exclude "-DxO_DeepPRIME XD2s_XD"
+  --exclude "-DxO_DeepPRIME XD2s_XD" \
+  --exclude "-DxO_DeepPRIME XD3"
 
 ```
 
