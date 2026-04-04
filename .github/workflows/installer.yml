@@ -22,16 +22,16 @@ jobs:
             bundle: dmg
             ext: dmg
             artifact_name: installer-macos-dmg
-            resource_glob: resources/bin/macos/**
+            resource_glob: resources/bin/macos/**/*
           - os: windows-latest
             bundle: msi
             ext: msi
             artifact_name: installer-windows-msi
-            resource_glob: resources/bin/windows/**
+            resource_glob: resources/bin/windows/**/*
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -110,7 +110,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
