@@ -1,0 +1,13 @@
+{
+  "bundle": {
+    "active": true,
+    "resources": [
+      "resources/bin/macos/**/*",
+      "resources/LICENSES/*"
+    ],
+    "macOS": {
+      "signingIdentity": "-",
+      "hardenedRuntime": false
+    }
+  }
+}
