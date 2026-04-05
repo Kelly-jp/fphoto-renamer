@@ -61,21 +61,51 @@ jobs:
         run: |
           bash scripts/verify_exiftool_license.sh "${{ matrix.os }}"
 
-      - name: Build installer
+      - name: Build signed macOS app bundle
+        if: runner.os == 'macOS'
         shell: bash
         run: |
+          set -euo pipefail
           cd crates/gui/src-tauri
-          CONFIG_JSON=$(cat <<EOF
-          {"bundle":{"active":true,"resources":["${{ matrix.resource_glob }}","resources/LICENSES/*"],"windows":{"webviewInstallMode":{"type":"offlineInstaller","silent":true}}}}
-          EOF
-          )
           cargo tauri build \
+            --ci \
+            --bundles app \
+            --config tauri.bundle.macos.adhoc.conf.json
+
+      - name: Verify macOS app bundle signature
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/macos_codesign_report.sh target/release/bundle/macos/fphoto-renamer.app
+
+      - name: Build macOS installer
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd crates/gui/src-tauri
+          cargo tauri build \
+            --ci \
+            --bundles dmg \
+            --config tauri.bundle.macos.adhoc.conf.json
+
+      - name: Build Windows installer
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd crates/gui/src-tauri
+          CONFIG_JSON='{"bundle":{"active":true,"resources":["${{ matrix.resource_glob }}","resources/LICENSES/*"],"windows":{"webviewInstallMode":{"type":"offlineInstaller","silent":true}}}}'
+          cargo tauri build \
+            --ci \
             --bundles "${{ matrix.bundle }}" \
             --config "${CONFIG_JSON}"
 
       - name: Collect installer artifacts
         shell: bash
         run: |
+          set -euo pipefail
           mkdir -p artifacts
           find . -type f \
             -path "*/target/release/bundle/${{ matrix.bundle }}/*.${{ matrix.ext }}" \
@@ -87,6 +117,20 @@ jobs:
           fi
 
           ls -la artifacts
+
+      - name: Ad-hoc sign macOS installer artifact
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/macos_adhoc_sign.sh artifacts/*.dmg
+
+      - name: Verify macOS installer signature
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/macos_codesign_report.sh artifacts/*.dmg
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
@@ -137,7 +181,15 @@ jobs:
             target/x86_64-apple-darwin/release/fphoto-renamer-cli \
             -output artifacts/fphoto-renamer-cli
           chmod +x artifacts/fphoto-renamer-cli
+          bash scripts/macos_adhoc_sign.sh artifacts/fphoto-renamer-cli
           file artifacts/fphoto-renamer-cli
+
+      - name: Verify macOS CLI signature
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/macos_codesign_report.sh artifacts/fphoto-renamer-cli
 
       - name: Package CLI artifact (Linux)
         if: runner.os == 'Linux'
