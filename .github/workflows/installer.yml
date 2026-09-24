@@ -13,7 +13,7 @@ jobs:
   build-installer:
     runs-on: ${{ matrix.os }}
     env:
-      EXIFTOOL_VERSION: "13.50"
+      EXIFTOOL_VERSION: "13.55"
     strategy:
       fail-fast: false
       matrix:

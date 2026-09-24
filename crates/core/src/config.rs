@@ -14,6 +14,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub backup_originals: bool,
     #[serde(default)]
+    pub remove_content_credentials: bool,
+    #[serde(default)]
     pub raw_parent_if_missing: bool,
 }
 
@@ -28,6 +30,7 @@ impl Default for AppConfig {
             exclude_strings: Vec::new(),
             dedupe_same_maker: true,
             backup_originals: false,
+            remove_content_credentials: false,
             raw_parent_if_missing: false,
         }
     }
@@ -137,6 +140,7 @@ mod tests {
         assert!(cfg.exclude_strings.is_empty());
         assert!(cfg.dedupe_same_maker);
         assert!(!cfg.backup_originals);
+        assert!(!cfg.remove_content_credentials);
         assert!(!cfg.raw_parent_if_missing);
     }
 
@@ -155,6 +159,7 @@ exclude_strings = ["-NR"]
         assert_eq!(cfg.exclude_strings, vec!["-NR"]);
         assert!(cfg.dedupe_same_maker);
         assert!(!cfg.backup_originals);
+        assert!(!cfg.remove_content_credentials);
         assert!(!cfg.raw_parent_if_missing);
     }
 }

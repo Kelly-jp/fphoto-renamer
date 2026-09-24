@@ -6,6 +6,7 @@ export function installTauriMock(options = {}) {
     exclusions: Array.isArray(options.settings?.exclusions) ? options.settings.exclusions : ["-NR"],
     dedupeSameMaker: options.settings?.dedupeSameMaker !== false,
     backupOriginals: Boolean(options.settings?.backupOriginals),
+    removeContentCredentials: Boolean(options.settings?.removeContentCredentials),
     rawParentIfMissing: Boolean(options.settings?.rawParentIfMissing),
   };
 
@@ -113,7 +114,12 @@ export function installTauriMock(options = {}) {
                 : Array.isArray(payload?.request?.plan?.candidates)
                   ? payload.request.plan.candidates.filter((row) => row?.changed).length
                   : 0;
-            return { applied };
+            return {
+              applied,
+              credentials_processed: payload?.request?.removeContentCredentials
+                ? payload?.request?.plan?.candidates?.length ?? 0
+                : 0,
+            };
           }
           case "undo_last_cmd": {
             const restored =

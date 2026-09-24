@@ -6,7 +6,7 @@ usage() {
 usage: scripts/prepare_bundled_exiftool.sh <os-name> [exiftool-version]
 
 examples:
-  scripts/prepare_bundled_exiftool.sh macos-latest 13.50
+  scripts/prepare_bundled_exiftool.sh macos-latest 13.55
   scripts/prepare_bundled_exiftool.sh windows-latest
 EOF
 }

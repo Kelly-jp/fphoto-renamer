@@ -1,5 +1,14 @@
 # fphoto-renamer リリースノート
 
+## 未リリース
+
+## v0.5.4 (2026-09-24)
+
+### 変更点
+
+- JPG/JPEG の C2PA / Content Credentials (JUMBF) を適用時に削除する CLI / GUI オプションを追加
+- Rust と Playwright の直接依存を最新の安定版へ更新し、配布用 ExifTool を最新の production release 13.55 へ更新
+
 ## v0.5.3 (2026-04-04)
 
 ### 変更点
