@@ -208,6 +208,13 @@ button:disabled {
   margin-top: 1px;
 }
 
+.option-note {
+  margin: 4px 0 0 22px;
+  color: #91a9bd;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
 .delete-input-row {
   display: grid;
   grid-template-columns: 1fr auto;

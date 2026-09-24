@@ -57,6 +57,8 @@ struct RenameArgs {
     dedupe_same_maker: bool,
     #[arg(long, default_value_t = false)]
     backup_originals: bool,
+    #[arg(long, default_value_t = false)]
+    remove_content_credentials: bool,
     #[arg(long, value_enum, default_value_t = OutputFormat::Table)]
     output: OutputFormat,
 }
@@ -121,11 +123,12 @@ fn cmd_rename(args: RenameArgs) -> Result<()> {
             &plan,
             &ApplyOptions {
                 backup_originals: args.backup_originals,
+                remove_content_credentials: args.remove_content_credentials,
             },
         )?;
         eprintln!(
-            "適用完了: {}件 (変更なし {}件)",
-            result.applied, result.unchanged
+            "適用完了: リネーム {}件、Content Credentials削除処理 {}件 (名前変更なし {}件)",
+            result.applied, result.credentials_processed, result.unchanged
         );
     } else {
         eprintln!("dry-run: リネームは未実行です。実行する場合は --apply を指定してください。");
@@ -276,6 +279,7 @@ mod tests {
                 assert!(args.exclude.is_empty());
                 assert!(args.dedupe_same_maker);
                 assert!(!args.backup_originals);
+                assert!(!args.remove_content_credentials);
                 assert!(matches!(args.output, OutputFormat::Table));
             }
             _ => panic!("rename command expected"),
@@ -301,6 +305,7 @@ mod tests {
             "-DxO",
             "--dedupe-same-maker=false",
             "--backup-originals",
+            "--remove-content-credentials",
             "--output",
             "json",
         ])
@@ -316,6 +321,7 @@ mod tests {
                 assert_eq!(args.exclude, vec!["-NR".to_string(), "-DxO".to_string()]);
                 assert!(!args.dedupe_same_maker);
                 assert!(args.backup_originals);
+                assert!(args.remove_content_credentials);
                 assert!(matches!(args.output, OutputFormat::Json));
             }
             _ => panic!("rename command expected"),

@@ -61,6 +61,7 @@ struct GuiSettingsResponse {
     exclusions: Vec<String>,
     dedupe_same_maker: bool,
     backup_originals: bool,
+    remove_content_credentials: bool,
     raw_parent_if_missing: bool,
 }
 
@@ -74,6 +75,8 @@ struct SaveGuiSettingsRequest {
     #[serde(default)]
     backup_originals: bool,
     #[serde(default)]
+    remove_content_credentials: bool,
+    #[serde(default)]
     raw_parent_if_missing: bool,
 }
 
@@ -83,6 +86,8 @@ struct ApplyRequest {
     plan: RenamePlan,
     #[serde(default)]
     backup_originals: bool,
+    #[serde(default)]
+    remove_content_credentials: bool,
 }
 
 struct AppState {
@@ -110,6 +115,7 @@ fn generate_plan_cmd(request: PlanRequest) -> Result<RenamePlan, String> {
 fn apply_plan_cmd(request: ApplyRequest) -> Result<fphoto_renamer_core::ApplyResult, String> {
     let options = ApplyOptions {
         backup_originals: request.backup_originals,
+        remove_content_credentials: request.remove_content_credentials,
     };
     apply_plan_with_options(&request.plan, &options).map_err(|err| err.to_string())
 }
@@ -162,6 +168,7 @@ fn load_gui_settings_cmd() -> Result<GuiSettingsResponse, String> {
         exclusions: config.exclude_strings,
         dedupe_same_maker: config.dedupe_same_maker,
         backup_originals: config.backup_originals,
+        remove_content_credentials: config.remove_content_credentials,
         raw_parent_if_missing: config.raw_parent_if_missing,
     })
 }
@@ -173,6 +180,7 @@ fn save_gui_settings_cmd(request: SaveGuiSettingsRequest) -> Result<(), String> 
     config.exclude_strings = request.exclusions;
     config.dedupe_same_maker = request.dedupe_same_maker;
     config.backup_originals = request.backup_originals;
+    config.remove_content_credentials = request.remove_content_credentials;
     config.raw_parent_if_missing = request.raw_parent_if_missing;
     save_config(&config).map_err(|err| err.to_string())
 }
