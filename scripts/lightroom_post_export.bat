@@ -26,6 +26,10 @@ set "DEDUPE_SAME_MAKER=1"
 rem 1: 変換前に backup フォルダへバックアップを作成 / 0: 作成しない
 set "BACKUP_ORIGINALS=0"
 
+rem 1: 適用時に JPG/JPEG の Content Credentials (JUMBF) を削除 / 0: 削除しない
+rem 元のメタデータを残す場合は BACKUP_ORIGINALS=1 にする
+set "REMOVE_CONTENT_CREDENTIALS=1"
+
 rem ファイル名から削除したい文字列（--exclude として複数指定）
 set "EXCLUDE1=-強化-NR"
 set "EXCLUDE2=-DxO_DeepPRIME XD2s_XD"
@@ -100,6 +104,9 @@ if "%DEDUPE_SAME_MAKER%"=="0" set "DEDUPE_ARG=--dedupe-same-maker=false"
 set "BACKUP_ARG="
 if "%BACKUP_ORIGINALS%"=="1" set "BACKUP_ARG=--backup-originals"
 
+set "REMOVE_CONTENT_CREDENTIALS_ARG="
+if "%REMOVE_CONTENT_CREDENTIALS%"=="1" set "REMOVE_CONTENT_CREDENTIALS_ARG=--remove-content-credentials"
+
 set "EXCLUDE_ARGS="
 if defined EXCLUDE1 set "EXCLUDE_ARGS=!EXCLUDE_ARGS! --exclude ""!EXCLUDE1!"""
 if defined EXCLUDE2 set "EXCLUDE_ARGS=!EXCLUDE_ARGS! --exclude ""!EXCLUDE2!"""
@@ -108,7 +115,7 @@ if defined EXCLUDE4 set "EXCLUDE_ARGS=!EXCLUDE_ARGS! --exclude ""!EXCLUDE4!"""
 if defined EXCLUDE5 set "EXCLUDE_ARGS=!EXCLUDE_ARGS! --exclude ""!EXCLUDE5!"""
 
 echo Running:
-echo "%CLI_BIN%" rename !JPG_INPUT_ARGS! --template "%TEMPLATE%" --output table --apply %RAW_PARENT_ARG% %DEDUPE_ARG% %BACKUP_ARG% %EXCLUDE_ARGS%
+echo "%CLI_BIN%" rename !JPG_INPUT_ARGS! --template "%TEMPLATE%" --output table --apply %RAW_PARENT_ARG% %DEDUPE_ARG% %BACKUP_ARG% %REMOVE_CONTENT_CREDENTIALS_ARG% %EXCLUDE_ARGS%
 echo.
 
 call "%CLI_BIN%" rename ^
@@ -119,6 +126,7 @@ call "%CLI_BIN%" rename ^
   %RAW_PARENT_ARG% ^
   %DEDUPE_ARG% ^
   %BACKUP_ARG% ^
+  %REMOVE_CONTENT_CREDENTIALS_ARG% ^
   %EXCLUDE_ARGS%
 
 if errorlevel 1 (
