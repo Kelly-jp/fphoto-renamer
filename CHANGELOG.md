@@ -2,6 +2,12 @@
 
 ## 未リリース
 
+## v0.5.5 (2026-09-24)
+
+### 変更点
+
+- Lightroom 後処理スクリプト（macOS `.command` / Windows `.bat`）に Content Credentials 削除の設定を追加し、既定で有効（`REMOVE_CONTENT_CREDENTIALS=1`）に変更
+
 ## v0.5.4 (2026-09-24)
 
 ### 変更点
