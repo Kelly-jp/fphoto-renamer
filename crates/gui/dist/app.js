@@ -50,6 +50,7 @@ const el = {
   resetTemplateBtn: document.getElementById("resetTemplateBtn"),
   dedupeSameMaker: document.getElementById("dedupeSameMaker"),
   backupOriginals: document.getElementById("backupOriginals"),
+  removeContentCredentials: document.getElementById("removeContentCredentials"),
   tokenButtons: document.getElementById("tokenButtons"),
   templateError: document.getElementById("templateError"),
   sample: document.getElementById("sample"),
@@ -105,6 +106,9 @@ async function loadPersistedSettings() {
     if (settings && typeof settings.backupOriginals === "boolean") {
       el.backupOriginals.checked = settings.backupOriginals;
     }
+    if (settings && typeof settings.removeContentCredentials === "boolean") {
+      el.removeContentCredentials.checked = settings.removeContentCredentials;
+    }
     if (settings && typeof settings.rawParentIfMissing === "boolean") {
       el.rawParentIfMissing.checked = settings.rawParentIfMissing;
     }
@@ -120,6 +124,7 @@ async function persistSettings() {
       exclusions: [...state.exclusions],
       dedupeSameMaker: el.dedupeSameMaker.checked,
       backupOriginals: el.backupOriginals.checked,
+      removeContentCredentials: el.removeContentCredentials.checked,
       rawParentIfMissing: el.rawParentIfMissing.checked,
     },
   });
@@ -458,6 +463,7 @@ function setInteractionLocked(locked) {
     el.resetTemplateBtn,
     el.dedupeSameMaker,
     el.backupOriginals,
+    el.removeContentCredentials,
     el.excludeInput,
     el.addExcludeBtn,
     el.applyBtn,
@@ -523,10 +529,17 @@ async function onApply() {
       request: {
         plan,
         backupOriginals: el.backupOriginals.checked,
+        removeContentCredentials: el.removeContentCredentials.checked,
       },
     });
     renderConvertLogEntries(buildLogEntriesFromPlan(plan, "✅"));
-    setMessage(`変換完了: ${result.applied}件`, false);
+    const strippedCount = Number(result.credentials_processed ?? result.credentialsProcessed) || 0;
+    setMessage(
+      strippedCount > 0
+        ? `変換完了: ${result.applied}件、Content Credentials削除処理: ${strippedCount}件`
+        : `変換完了: ${result.applied}件`,
+      false
+    );
     const appliedCount = Number(result.applied) || 0;
     const changedCount = Array.isArray(plan?.candidates)
       ? plan.candidates.filter((row) => row.changed).length
@@ -1233,6 +1246,7 @@ function bindEvents() {
     await onTemplateInputChanged();
   });
   el.backupOriginals.addEventListener("change", schedulePersistSettings);
+  el.removeContentCredentials.addEventListener("change", schedulePersistSettings);
   el.rawParentIfMissing.addEventListener("change", schedulePersistSettings);
   el.dedupeSameMaker.addEventListener("change", async () => {
     schedulePersistSettings();

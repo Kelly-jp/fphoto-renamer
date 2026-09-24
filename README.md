@@ -187,6 +187,7 @@ Windows (PowerShell) の例:
 - 削除文字列はスペース/ハイフン/アンダースコアの揺れを吸収して削除
 - Windows/macOS 禁止文字の正規化
 - GUI の「バックアップ」チェックONで、適用時に `JPGフォルダ/backup` へ元ファイルをバックアップ
+- `--remove-content-credentials` / GUI のチェック項目で、適用時に JPG/JPEG の C2PA / Content Credentials (JUMBF) を削除（ファイル名が変わらない写真も対象）
 - GUI はフォルダ選択・ドラッグ＆ドロップ・クリアボタンに対応（GUI入力は従来通りフォルダ前提）
 - dry-run 既定、`--apply` で適用
 - 直近1回の undo
@@ -239,6 +240,14 @@ cargo run -p fphoto-renamer-cli -- rename \
 ```bash
 cargo run -p fphoto-renamer-cli -- rename --jpg-input /path/to/jpg --apply
 ```
+
+Content Credentials を削除する場合:
+
+```bash
+cargo run -p fphoto-renamer-cli -- rename --jpg-input /path/to/jpg --apply --remove-content-credentials --backup-originals
+```
+
+この処理には ExifTool が必要です。`--apply` を指定しない dry-run ではメタデータを書き換えません。`undo` はファイル名のみを戻します。削除前のメタデータが必要な場合は `--backup-originals` を指定してください。この組み合わせで作成した `backup` フォルダ内の元ファイルは `undo` 後も保持されます。
 
 取り消し:
 

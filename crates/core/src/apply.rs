@@ -5,8 +5,10 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::ffi::OsString;
-use std::fs;
+use std::fs::{self, File, OpenOptions};
+use std::io;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -14,6 +16,8 @@ struct UndoLog {
     operations: Vec<RenameOperation>,
     #[serde(default)]
     backup_originals: bool,
+    #[serde(default)]
+    remove_content_credentials: bool,
     #[serde(default)]
     jpg_root: Option<PathBuf>,
     #[serde(default)]
@@ -39,11 +43,13 @@ struct ValidatedUndoLog {
 pub struct ApplyResult {
     pub applied: usize,
     pub unchanged: usize,
+    pub credentials_processed: usize,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
 pub struct ApplyOptions {
     pub backup_originals: bool,
+    pub remove_content_credentials: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,15 +71,35 @@ fn apply_plan_with_options_with_paths(
     options: &ApplyOptions,
     paths: &AppPaths,
 ) -> Result<ApplyResult> {
-    let candidates: Vec<&RenameCandidate> = plan.candidates.iter().filter(|c| c.changed).collect();
+    apply_plan_with_options_with_paths_and_stripper(plan, options, paths, remove_jumbf)
+}
+
+fn apply_plan_with_options_with_paths_and_stripper(
+    plan: &RenamePlan,
+    options: &ApplyOptions,
+    paths: &AppPaths,
+    strip_jumbf: impl Fn(&Path) -> Result<()>,
+) -> Result<ApplyResult> {
+    let candidates: Vec<&RenameCandidate> = plan
+        .candidates
+        .iter()
+        .filter(|c| c.changed || options.remove_content_credentials)
+        .collect();
     if candidates.is_empty() {
         return Ok(ApplyResult {
             applied: 0,
             unchanged: plan.candidates.len(),
+            credentials_processed: 0,
         });
     }
 
     validate_apply_candidates(plan, &candidates)?;
+
+    let stripped_copies = if options.remove_content_credentials {
+        prepare_stripped_copies(&candidates, strip_jumbf)?
+    } else {
+        TemporaryCopies(Vec::new())
+    };
 
     let backup_paths = if options.backup_originals {
         backup_original_files(plan, &candidates)?
@@ -106,13 +132,23 @@ fn apply_plan_with_options_with_paths(
 
     let mut operations = Vec::with_capacity(candidates.len());
     for (finalized, entry) in staged.iter().enumerate() {
-        if let Err(err) = fs::rename(&entry.temp_path, &entry.target_path) {
+        let source = if options.remove_content_credentials {
+            &stripped_copies.0[finalized]
+        } else {
+            &entry.temp_path
+        };
+        if let Err(err) = fs::rename(source, &entry.target_path) {
             let apply_err = anyhow::Error::from(err).context(format!(
                 "最終リネームに失敗しました: {} -> {}",
-                entry.temp_path.display(),
+                source.display(),
                 entry.target_path.display()
             ));
-            if let Err(rollback_err) = rollback_after_final_rename_failure(&staged, finalized) {
+            let rollback_result = if options.remove_content_credentials {
+                rollback_stripped_apply(&staged, finalized)
+            } else {
+                rollback_after_final_rename_failure(&staged, finalized)
+            };
+            if let Err(rollback_err) = rollback_result {
                 return Err(apply_err.context(format!(
                     "最終リネーム失敗後のロールバックにも失敗しました: {rollback_err}"
                 )));
@@ -120,14 +156,25 @@ fn apply_plan_with_options_with_paths(
             return Err(apply_err);
         }
 
-        operations.push(RenameOperation {
-            from: entry.original_path.clone(),
-            to: entry.target_path.clone(),
-        });
+        if entry.original_path != entry.target_path {
+            operations.push(RenameOperation {
+                from: entry.original_path.clone(),
+                to: entry.target_path.clone(),
+            });
+        }
     }
 
-    if let Err(persist_err) = persist_undo(&operations, plan, options, &backup_paths, paths) {
-        let rollback_result = rollback_after_undo_persist_failure(&operations);
+    let persist_result = if operations.is_empty() {
+        Ok(())
+    } else {
+        persist_undo(&operations, plan, options, &backup_paths, paths)
+    };
+    if let Err(persist_err) = persist_result {
+        let rollback_result = if options.remove_content_credentials {
+            rollback_stripped_apply(&staged, staged.len())
+        } else {
+            rollback_after_undo_persist_failure(&operations)
+        };
         let backup_cleanup_result =
             cleanup_created_backups_after_persist_failure(plan, &backup_paths);
         return Err(compose_persist_failure_error(
@@ -137,10 +184,102 @@ fn apply_plan_with_options_with_paths(
         ));
     }
 
+    if options.remove_content_credentials {
+        for entry in &staged {
+            fs::remove_file(&entry.temp_path).with_context(|| {
+                format!(
+                    "元ファイルの一時退避を削除できませんでした: {}",
+                    entry.temp_path.display()
+                )
+            })?;
+        }
+    }
+
     Ok(ApplyResult {
         applied: operations.len(),
         unchanged: plan.candidates.len().saturating_sub(operations.len()),
+        credentials_processed: stripped_copies.0.len(),
     })
+}
+
+struct TemporaryCopies(Vec<PathBuf>);
+
+impl Drop for TemporaryCopies {
+    fn drop(&mut self) {
+        for path in &self.0 {
+            if path.exists() {
+                let _ = fs::remove_file(path);
+            }
+        }
+    }
+}
+
+fn prepare_stripped_copies(
+    candidates: &[&RenameCandidate],
+    strip_jumbf: impl Fn(&Path) -> Result<()>,
+) -> Result<TemporaryCopies> {
+    let mut copies = TemporaryCopies(Vec::with_capacity(candidates.len()));
+    for (index, candidate) in candidates.iter().enumerate() {
+        let copy = temp_path_for(&candidate.original_path, index + candidates.len());
+        let mut target = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&copy)
+            .with_context(|| {
+                format!("C2PA削除用コピーを作成できませんでした: {}", copy.display())
+            })?;
+        copies.0.push(copy.clone());
+        let mut source = File::open(&candidate.original_path).with_context(|| {
+            format!(
+                "元ファイルを開けませんでした: {}",
+                candidate.original_path.display()
+            )
+        })?;
+        io::copy(&mut source, &mut target).with_context(|| {
+            format!("C2PA削除用コピーに書き込めませんでした: {}", copy.display())
+        })?;
+        let metadata = source.metadata()?;
+        target.set_permissions(metadata.permissions())?;
+        target.set_modified(metadata.modified()?)?;
+        drop(target);
+        strip_jumbf(&copy).with_context(|| {
+            format!(
+                "C2PA / Content Credentials の削除に失敗しました: {}",
+                candidate.original_path.display()
+            )
+        })?;
+    }
+    Ok(copies)
+}
+
+fn remove_jumbf(path: &Path) -> Result<()> {
+    let executable = std::env::var_os("FPHOTO_EXIFTOOL_PATH")
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "exiftool".into());
+    let output = Command::new(executable)
+        .args(["-overwrite_original", "-P", "-JUMBF:all="])
+        .arg(path)
+        .output()
+        .context("C2PA削除には ExifTool が必要です")?;
+    if !output.status.success() {
+        bail!(
+            "ExifTool が JUMBF を削除できませんでした: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    Ok(())
+}
+
+fn rollback_stripped_apply(staged: &[StagedRename], finalized: usize) -> Result<()> {
+    for entry in staged[..finalized].iter().rev() {
+        fs::remove_file(&entry.target_path).with_context(|| {
+            format!(
+                "C2PA削除後のロールバックに失敗しました: {}",
+                entry.target_path.display()
+            )
+        })?;
+    }
+    rollback_staged_to_original_paths(staged)
 }
 
 #[derive(Debug, Clone)]
@@ -486,6 +625,10 @@ fn unique_backup_path_with_reserved(
 
 pub fn undo_last() -> Result<UndoResult> {
     let paths = app_paths()?;
+    undo_last_with_paths(&paths)
+}
+
+fn undo_last_with_paths(paths: &AppPaths) -> Result<UndoResult> {
     if !paths.undo_path.exists() {
         anyhow::bail!("取り消し可能な履歴がありません");
     }
@@ -501,7 +644,9 @@ pub fn undo_last() -> Result<UndoResult> {
 
     let restored = restore_operations(&validated.operations)?;
 
-    cleanup_backup_if_needed(&validated)?;
+    if !log.remove_content_credentials {
+        cleanup_backup_if_needed(&validated)?;
+    }
 
     fs::remove_file(&paths.undo_path).with_context(|| {
         format!(
@@ -643,6 +788,7 @@ fn persist_undo(
     let log = UndoLog {
         operations: operations.to_vec(),
         backup_originals: options.backup_originals,
+        remove_content_credentials: options.remove_content_credentials,
         jpg_root: Some(plan.jpg_root.clone()),
         jpg_roots: plan_jpg_roots(plan),
         backup_paths: backup_paths.to_vec(),
@@ -770,14 +916,20 @@ fn remove_empty_dirs_until(start: &Path, stop: &Path) -> Result<()> {
 fn temp_path_for(original_path: &Path, index: usize) -> PathBuf {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis())
+        .map(|d| d.as_nanos())
         .unwrap_or(0);
     let parent = original_path.parent().unwrap_or_else(|| Path::new("."));
     let file_name = original_path
         .file_name()
         .map(|v| v.to_string_lossy().to_string())
         .unwrap_or_else(|| "file".to_string());
-    parent.join(format!(".fphoto_tmp_{}_{}_{}", now, index, file_name))
+    parent.join(format!(
+        ".fphoto_tmp_{}_{}_{}_{}",
+        std::process::id(),
+        now,
+        index,
+        file_name
+    ))
 }
 
 #[cfg(test)]
@@ -785,9 +937,10 @@ mod tests {
     #[cfg(unix)]
     use super::backup_original_files;
     use super::{
-        apply_plan_with_options, apply_plan_with_options_with_paths, cleanup_backup_if_needed,
+        apply_plan_with_options, apply_plan_with_options_with_paths,
+        apply_plan_with_options_with_paths_and_stripper, cleanup_backup_if_needed,
         resolve_backup_path, resolve_backup_path_with_reserved, restore_operations,
-        unique_backup_path, validate_undo_log, ApplyOptions, UndoLog,
+        undo_last_with_paths, unique_backup_path, validate_undo_log, ApplyOptions, UndoLog,
     };
     use crate::config::AppPaths;
     use crate::metadata::{MetadataSource, PhotoMetadata};
@@ -797,6 +950,7 @@ mod tests {
     use std::fs;
     #[cfg(unix)]
     use std::os::unix::fs as unix_fs;
+    use std::path::Path;
     use std::path::PathBuf;
     use tempfile::tempdir;
 
@@ -843,6 +997,225 @@ mod tests {
             .expect("unchanged plan should be accepted");
         assert_eq!(result.applied, 0);
         assert_eq!(result.unchanged, 1);
+    }
+
+    #[test]
+    fn stripping_processes_unchanged_files_and_keeps_requested_backup() {
+        let temp = tempdir().expect("tempdir");
+        let jpg_root = temp.path().join("jpg");
+        fs::create_dir_all(&jpg_root).expect("create jpg root");
+        let original = jpg_root.join("IMG_0001.JPG");
+        fs::write(&original, b"original credentials").expect("write original");
+        let plan = RenamePlan {
+            jpg_root: jpg_root.clone(),
+            jpg_roots: vec![jpg_root.clone()],
+            template: "{orig_name}".to_string(),
+            exclusions: Vec::new(),
+            candidates: vec![RenameCandidate {
+                original_path: original.clone(),
+                target_path: original.clone(),
+                metadata_source: MetadataSource::JpgExif,
+                source_label: "jpg".to_string(),
+                metadata: sample_metadata(original.clone()),
+                rendered_base: "IMG_0001".to_string(),
+                changed: false,
+            }],
+            stats: RenameStats::default(),
+        };
+        let paths = AppPaths {
+            config_dir: temp.path().join("config"),
+            config_path: temp.path().join("config/config.toml"),
+            undo_path: temp.path().join("config/undo-last.json"),
+        };
+
+        let result = apply_plan_with_options_with_paths_and_stripper(
+            &plan,
+            &ApplyOptions {
+                backup_originals: true,
+                remove_content_credentials: true,
+            },
+            &paths,
+            |path: &Path| {
+                fs::write(path, b"stripped")?;
+                Ok(())
+            },
+        )
+        .expect("strip unchanged image");
+
+        assert_eq!(result.applied, 0);
+        assert_eq!(result.credentials_processed, 1);
+        assert_eq!(fs::read(&original).expect("read result"), b"stripped");
+        assert_eq!(
+            fs::read(jpg_root.join("backup/IMG_0001.JPG")).expect("read backup"),
+            b"original credentials"
+        );
+        assert!(!paths.undo_path.exists());
+    }
+
+    #[test]
+    fn stripping_failure_leaves_all_originals_unchanged() {
+        let temp = tempdir().expect("tempdir");
+        let jpg_root = temp.path().join("jpg");
+        fs::create_dir_all(&jpg_root).expect("create jpg root");
+        let original_a = jpg_root.join("IMG_A.JPG");
+        let original_b = jpg_root.join("IMG_B.JPG");
+        fs::write(&original_a, b"original A").expect("write A");
+        fs::write(&original_b, b"original B").expect("write B");
+        let candidates = [&original_a, &original_b]
+            .into_iter()
+            .map(|path| RenameCandidate {
+                original_path: path.clone(),
+                target_path: path.clone(),
+                metadata_source: MetadataSource::JpgExif,
+                source_label: "jpg".to_string(),
+                metadata: sample_metadata(path.clone()),
+                rendered_base: "IMG".to_string(),
+                changed: false,
+            })
+            .collect();
+        let plan = RenamePlan {
+            jpg_root: jpg_root.clone(),
+            jpg_roots: vec![jpg_root.clone()],
+            template: "{orig_name}".to_string(),
+            exclusions: Vec::new(),
+            candidates,
+            stats: RenameStats::default(),
+        };
+        let paths = AppPaths {
+            config_dir: temp.path().join("config"),
+            config_path: temp.path().join("config/config.toml"),
+            undo_path: temp.path().join("config/undo-last.json"),
+        };
+
+        let err = apply_plan_with_options_with_paths_and_stripper(
+            &plan,
+            &ApplyOptions {
+                backup_originals: false,
+                remove_content_credentials: true,
+            },
+            &paths,
+            |path: &Path| {
+                if path.to_string_lossy().contains("IMG_B") {
+                    anyhow::bail!("simulated ExifTool failure");
+                }
+                fs::write(path, b"stripped")?;
+                Ok(())
+            },
+        )
+        .expect_err("second image should fail");
+
+        assert!(err.to_string().contains("IMG_B.JPG"));
+        assert_eq!(fs::read(&original_a).expect("read A"), b"original A");
+        assert_eq!(fs::read(&original_b).expect("read B"), b"original B");
+        assert_eq!(fs::read_dir(&jpg_root).expect("read folder").count(), 2);
+    }
+
+    #[test]
+    fn undo_after_stripping_restores_name_and_retains_original_backup() {
+        let temp = tempdir().expect("tempdir");
+        let jpg_root = temp.path().join("jpg");
+        fs::create_dir_all(&jpg_root).expect("create jpg root");
+        let original = jpg_root.join("IMG_0001.JPG");
+        let renamed = jpg_root.join("RENAMED.JPG");
+        fs::write(&original, b"original credentials").expect("write original");
+        let plan = RenamePlan {
+            jpg_root: jpg_root.clone(),
+            jpg_roots: vec![jpg_root.clone()],
+            template: "RENAMED".to_string(),
+            exclusions: Vec::new(),
+            candidates: vec![RenameCandidate {
+                original_path: original.clone(),
+                target_path: renamed.clone(),
+                metadata_source: MetadataSource::JpgExif,
+                source_label: "jpg".to_string(),
+                metadata: sample_metadata(original.clone()),
+                rendered_base: "RENAMED".to_string(),
+                changed: true,
+            }],
+            stats: RenameStats::default(),
+        };
+        let paths = AppPaths {
+            config_dir: temp.path().join("config"),
+            config_path: temp.path().join("config/config.toml"),
+            undo_path: temp.path().join("config/undo-last.json"),
+        };
+        apply_plan_with_options_with_paths_and_stripper(
+            &plan,
+            &ApplyOptions {
+                backup_originals: true,
+                remove_content_credentials: true,
+            },
+            &paths,
+            |path: &Path| {
+                fs::write(path, b"stripped")?;
+                Ok(())
+            },
+        )
+        .expect("apply strip and rename");
+
+        assert_eq!(fs::read(&renamed).expect("read renamed"), b"stripped");
+        assert_eq!(undo_last_with_paths(&paths).expect("undo").restored, 1);
+        assert_eq!(fs::read(&original).expect("read restored"), b"stripped");
+        assert_eq!(
+            fs::read(jpg_root.join("backup/IMG_0001.JPG")).expect("read backup"),
+            b"original credentials"
+        );
+    }
+
+    #[test]
+    fn stripping_rolls_back_when_undo_log_cannot_be_saved() {
+        let temp = tempdir().expect("tempdir");
+        let jpg_root = temp.path().join("jpg");
+        fs::create_dir_all(&jpg_root).expect("create jpg root");
+        let original = jpg_root.join("IMG_0001.JPG");
+        let renamed = jpg_root.join("RENAMED.JPG");
+        fs::write(&original, b"original credentials").expect("write original");
+        let plan = RenamePlan {
+            jpg_root: jpg_root.clone(),
+            jpg_roots: vec![jpg_root.clone()],
+            template: "RENAMED".to_string(),
+            exclusions: Vec::new(),
+            candidates: vec![RenameCandidate {
+                original_path: original.clone(),
+                target_path: renamed.clone(),
+                metadata_source: MetadataSource::JpgExif,
+                source_label: "jpg".to_string(),
+                metadata: sample_metadata(original.clone()),
+                rendered_base: "RENAMED".to_string(),
+                changed: true,
+            }],
+            stats: RenameStats::default(),
+        };
+        let blocked_config_dir = temp.path().join("blocked-config");
+        fs::write(&blocked_config_dir, b"not a directory").expect("block config dir");
+        let paths = AppPaths {
+            config_dir: blocked_config_dir.clone(),
+            config_path: blocked_config_dir.join("config.toml"),
+            undo_path: blocked_config_dir.join("undo-last.json"),
+        };
+
+        let err = apply_plan_with_options_with_paths_and_stripper(
+            &plan,
+            &ApplyOptions {
+                backup_originals: true,
+                remove_content_credentials: true,
+            },
+            &paths,
+            |path: &Path| {
+                fs::write(path, b"stripped")?;
+                Ok(())
+            },
+        )
+        .expect_err("undo persistence should fail");
+
+        assert!(err.to_string().contains("取り消しログ"));
+        assert_eq!(
+            fs::read(&original).expect("read original"),
+            b"original credentials"
+        );
+        assert!(!renamed.exists());
+        assert!(!jpg_root.join("backup").exists());
+        assert_eq!(fs::read_dir(&jpg_root).expect("read folder").count(), 1);
     }
 
     #[test]
@@ -949,6 +1322,7 @@ mod tests {
         let log = UndoLog {
             operations: Vec::new(),
             backup_originals: true,
+            remove_content_credentials: false,
             jpg_root: Some(jpg_root.clone()),
             jpg_roots: Vec::new(),
             backup_paths: vec![backup_file],
@@ -968,6 +1342,7 @@ mod tests {
         let log = UndoLog {
             operations: Vec::new(),
             backup_originals: false,
+            remove_content_credentials: false,
             jpg_root: Some(jpg_root),
             jpg_roots: Vec::new(),
             backup_paths: Vec::new(),
@@ -991,6 +1366,7 @@ mod tests {
         let log = UndoLog {
             operations: Vec::new(),
             backup_originals: true,
+            remove_content_credentials: false,
             jpg_root: Some(jpg_root),
             jpg_roots: Vec::new(),
             backup_paths: vec![tracked.clone()],
@@ -1015,6 +1391,7 @@ mod tests {
         let log = UndoLog {
             operations: Vec::new(),
             backup_originals: true,
+            remove_content_credentials: false,
             jpg_root: Some(jpg_root),
             jpg_roots: Vec::new(),
             backup_paths: Vec::new(),
@@ -1187,6 +1564,7 @@ mod tests {
             &plan,
             &ApplyOptions {
                 backup_originals: true,
+                remove_content_credentials: false,
             },
             &blocked_paths,
         )
@@ -1310,6 +1688,7 @@ mod tests {
                 },
             ],
             backup_originals: false,
+            remove_content_credentials: false,
             jpg_root: None,
             jpg_roots: Vec::new(),
             backup_paths: Vec::new(),
@@ -1339,6 +1718,7 @@ mod tests {
                 to: outside_to,
             }],
             backup_originals: false,
+            remove_content_credentials: false,
             jpg_root: Some(jpg_root),
             jpg_roots: Vec::new(),
             backup_paths: Vec::new(),

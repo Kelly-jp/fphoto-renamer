@@ -105,14 +105,16 @@ test.describe("Browser UI smoke", () => {
     expect(invokedCommands).toContain("render_fixed_sample_cmd");
   });
 
-  test("保存済み設定のdedupe状態をチェックボックスへ反映する", async ({ page }) => {
+  test("保存済み設定のチェック状態を反映する", async ({ page }) => {
     await openWithMock(page, {
       settings: {
         dedupeSameMaker: false,
+        removeContentCredentials: true,
       },
     });
 
     await expect(page.locator("#dedupeSameMaker")).not.toBeChecked();
+    await expect(page.locator("#removeContentCredentials")).toBeChecked();
   });
 
   test("JPG入力後に変換実行できログが出る", async ({ page }) => {
@@ -331,6 +333,7 @@ test.describe("Browser UI smoke", () => {
       const template = document.querySelector("#templateInput");
       const dedupe = document.querySelector("#dedupeSameMaker");
       const backup = document.querySelector("#backupOriginals");
+      const removeCredentials = document.querySelector("#removeContentCredentials");
       const rawParent = document.querySelector("#rawParentIfMissing");
 
       template.value = "{year}_A";
@@ -340,6 +343,8 @@ test.describe("Browser UI smoke", () => {
 
       backup.checked = true;
       backup.dispatchEvent(new Event("change", { bubbles: true }));
+      removeCredentials.checked = true;
+      removeCredentials.dispatchEvent(new Event("change", { bubbles: true }));
       rawParent.checked = true;
       rawParent.dispatchEvent(new Event("change", { bubbles: true }));
       dedupe.checked = false;
@@ -355,6 +360,7 @@ test.describe("Browser UI smoke", () => {
       exclusions: ["-NR"],
       dedupeSameMaker: false,
       backupOriginals: true,
+      removeContentCredentials: true,
       rawParentIfMissing: true,
     });
   });
@@ -450,6 +456,7 @@ test.describe("Browser UI smoke", () => {
     await page.fill("#jpgInput", "/tmp/mock-jpg");
     await page.fill("#rawInput", "/tmp/mock-raw");
     await page.check("#backupOriginals");
+    await page.check("#removeContentCredentials");
     await page.check("#rawParentIfMissing");
     await page.uncheck("#dedupeSameMaker");
     await page.fill("#excludeInput", "-pending");
@@ -467,6 +474,8 @@ test.describe("Browser UI smoke", () => {
     const applyCalls = await getMockCalls(page, "apply_plan_cmd");
     expect(applyCalls.length).toBeGreaterThan(0);
     expect(applyCalls.at(-1).payload.request.backupOriginals).toBe(true);
+    expect(applyCalls.at(-1).payload.request.removeContentCredentials).toBe(true);
+    await expect(page.locator("#actionMessage")).toContainText("Content Credentials削除処理: 1件");
   });
 
   test("テンプレートリセットで既定値に戻る", async ({ page }) => {
