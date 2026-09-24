@@ -249,6 +249,8 @@ cargo run -p fphoto-renamer-cli -- rename --jpg-input /path/to/jpg --apply --rem
 
 この処理には ExifTool が必要です。`--apply` を指定しない dry-run ではメタデータを書き換えません。`undo` はファイル名のみを戻します。削除前のメタデータが必要な場合は `--backup-originals` を指定してください。この組み合わせで作成した `backup` フォルダ内の元ファイルは `undo` 後も保持されます。
 
+Lightroom 後処理スクリプト（macOS `.command` / Windows `.bat`）は `REMOVE_CONTENT_CREDENTIALS=1` でこの処理が有効です。無効にする場合は `0`、削除前のメタデータを残す場合は `BACKUP_ORIGINALS=1` に変更してください。
+
 取り消し:
 
 ```bash

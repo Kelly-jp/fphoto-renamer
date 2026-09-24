@@ -20,6 +20,9 @@ USE_RAW_PARENT_IF_MISSING=1
 DEDUPE_SAME_MAKER=1
 # 1: 変換前に backup フォルダへバックアップを作成 / 0: 作成しない
 BACKUP_ORIGINALS=0
+# 1: 適用時に JPG/JPEG の Content Credentials (JUMBF) を削除 / 0: 削除しない
+# 元のメタデータを残す場合は BACKUP_ORIGINALS=1 にする
+REMOVE_CONTENT_CREDENTIALS=1
 # ファイル名から削除したい文字列（--exclude として複数指定）
 EXCLUDES=(
   "-強化-NR"
@@ -93,6 +96,10 @@ fi
 
 if [[ "${BACKUP_ORIGINALS}" -eq 1 ]]; then
   CMD+=("--backup-originals")
+fi
+
+if [[ "${REMOVE_CONTENT_CREDENTIALS}" -eq 1 ]]; then
+  CMD+=("--remove-content-credentials")
 fi
 
 for value in "${EXCLUDES[@]}"; do
