@@ -220,13 +220,33 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           pattern: installer-*
-          path: downloaded/installer
+          path: downloaded/installer-zips
+          skip-decompress: true
 
       - name: Download CLI artifacts
         uses: actions/download-artifact@v8
         with:
           pattern: cli-*
-          path: downloaded/cli
+          path: downloaded/cli-zips
+          skip-decompress: true
+
+      # Action内部のZIP展開ライブラリは非推奨のBuffer()を使用するため、標準unzipで展開する。
+      - name: Extract artifact archives
+        shell: bash
+        run: |
+          set -euo pipefail
+          for group in installer cli; do
+            for archive_dir in "downloaded/${group}-zips/"*; do
+              archives=("${archive_dir}/"*)
+              if [[ ${#archives[@]} -ne 1 || ! -f "${archives[0]}" ]]; then
+                echo "Expected one artifact archive in ${archive_dir}" >&2
+                exit 1
+              fi
+              destination="downloaded/${group}/$(basename "$archive_dir")"
+              mkdir -p "$destination"
+              unzip -q "${archives[0]}" -d "$destination"
+            done
+          done
 
       - name: Prepare release assets
         shell: bash
