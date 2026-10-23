@@ -174,11 +174,6 @@ fn exiftool_path_candidates() -> Vec<PathBuf> {
                 candidates.push(exe_dir.join("resources/bin/macos/exiftool"));
                 candidates.push(exe_dir.join("exiftool"));
             }
-            #[cfg(target_os = "linux")]
-            {
-                candidates.push(exe_dir.join("resources/bin/linux/exiftool"));
-                candidates.push(exe_dir.join("exiftool"));
-            }
         }
     }
 
@@ -196,15 +191,6 @@ fn exiftool_path_candidates() -> Vec<PathBuf> {
                 .join("../gui/src-tauri/resources/bin/macos/exiftool"),
         );
         candidates.push(PathBuf::from("/opt/homebrew/bin/exiftool"));
-        candidates.push(PathBuf::from("/usr/local/bin/exiftool"));
-        candidates.push(PathBuf::from("/usr/bin/exiftool"));
-    }
-    #[cfg(target_os = "linux")]
-    {
-        candidates.push(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("../gui/src-tauri/resources/bin/linux/exiftool"),
-        );
         candidates.push(PathBuf::from("/usr/local/bin/exiftool"));
         candidates.push(PathBuf::from("/usr/bin/exiftool"));
     }

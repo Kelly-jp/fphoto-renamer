@@ -20,9 +20,6 @@ normalize_os_name() {
     windows | windows-latest)
       echo "windows"
       ;;
-    linux | ubuntu-latest)
-      echo "linux"
-      ;;
     *)
       echo "unsupported os name: ${os_name}" >&2
       exit 2
@@ -212,7 +209,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 echo "Preparing bundled ExifTool ${exiftool_version} for ${target_os}..."
 
 case "$target_os" in
-  macos | linux)
+  macos)
     prepare_unix_bundle "$target_os" "$exiftool_version" "$repo_root"
     ;;
   windows)

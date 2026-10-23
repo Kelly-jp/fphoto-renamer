@@ -20,10 +20,6 @@ case "$os_name" in
     exiftool_path="crates/gui/src-tauri/resources/bin/windows/exiftool.exe"
     exiftool_lib_marker="crates/gui/src-tauri/resources/bin/windows/exiftool_files/exiftool.pl"
     ;;
-  linux | ubuntu-latest)
-    exiftool_path="crates/gui/src-tauri/resources/bin/linux/exiftool"
-    exiftool_lib_marker="crates/gui/src-tauri/resources/bin/linux/lib/Image/ExifTool.pm"
-    ;;
   *)
     echo "unsupported os name: $os_name" >&2
     exit 2
