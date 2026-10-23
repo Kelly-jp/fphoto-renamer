@@ -80,7 +80,7 @@ jobs:
           Copy-Item target/release/fphoto-renamer-cli.exe artifacts/fphoto-renamer-cli-windows-x86_64.exe
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: cli-${{ runner.os }}
           path: artifacts/*

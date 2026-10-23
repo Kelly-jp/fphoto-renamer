@@ -133,7 +133,7 @@ jobs:
           bash scripts/macos_codesign_report.sh artifacts/*.dmg
 
       - name: Upload installer artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact_name }}
           path: artifacts/*.${{ matrix.ext }}
@@ -206,7 +206,7 @@ jobs:
           Copy-Item "target/release/fphoto-renamer-cli.exe" "artifacts/fphoto-renamer-cli-windows-x86_64.exe"
 
       - name: Upload CLI artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact_name }}
           path: artifacts/*
@@ -217,13 +217,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download installer artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           pattern: installer-*
           path: downloaded/installer
 
       - name: Download CLI artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           pattern: cli-*
           path: downloaded/cli
