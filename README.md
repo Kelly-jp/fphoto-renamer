@@ -1,6 +1,6 @@
 # fphoto-renamer
 
-撮影日時・カメラ・レンズなどの情報を使い、JPG/JPEGのファイル名を一括変更するツールです。macOS・Windows向けのGUIと、Linuxでも使えるCLIを提供します。
+撮影日時・カメラ・レンズなどの情報を使い、JPG/JPEGのファイル名を一括変更するツールです。macOS・Windows向けにGUIとCLIを提供します。
 
 - ファイル名の書式をテンプレートで指定
 - JPGのEXIFに加え、同名のXMP・RAWから情報を取得
@@ -15,11 +15,12 @@
 | --- | --- | --- |
 | macOS | `.dmg` | `fphoto-renamer-cli-macos-universal.tar.gz`（Intel・Apple Silicon共通） |
 | Windows | `.msi` | `fphoto-renamer-cli-windows-x86_64.exe` |
-| Linux | — | `fphoto-renamer-cli-linux-x86_64.tar.gz` |
+
+サポート対象はmacOS・Windowsです。Linux向けのビルド・テスト・配布は行いません。
 
 GUIインストーラにはExifToolを同梱し、Windows版にはWebView2 Runtimeも同梱します。CLIでExifToolを使う場合は、別途用意してください。ExifToolが見つからない場合、EXIFの読み取りは内蔵ライブラリに切り替わります。ただし、Content Credentialsの削除にはExifToolが必要です。
 
-macOS・LinuxのCLIは、アーカイブを展開して実行します。以下はmacOSの例です（Linuxではファイル名を置き換えてください）。
+macOSのCLIは、アーカイブを展開して実行します。
 
 ```bash
 tar -xzf fphoto-renamer-cli-macos-universal.tar.gz
@@ -44,7 +45,7 @@ GUIの入力はフォルダ単位です。フォルダ欄はクリアでき、�
 
 ## CLIの使い方
 
-以下はmacOS・Linuxの例です。Windowsでは `./fphoto-renamer-cli` を `.\fphoto-renamer-cli-windows-x86_64.exe` に置き換えてください。パスに空白がある場合は引用符で囲みます。
+以下はmacOSの例です。Windowsでは `./fphoto-renamer-cli` を `.\fphoto-renamer-cli-windows-x86_64.exe` に置き換えてください。パスに空白がある場合は引用符で囲みます。
 
 ### 変更内容を確認してから適用する
 
@@ -232,7 +233,10 @@ Playwrightで `crates/gui/dist` をHTTP配信し、画面操作・入力検証�
 ### CI・配布とライセンス
 
 - [Build Installers](.github/workflows/installer.yml): macOS `.dmg`・Windows `.msi` と各OSのCLIを生成します。
-- [Build CLI](.github/workflows/cli-build.yml): Linux・macOS・WindowsのCLIを生成します。両ワークフローのCLI artifact名は `cli-Linux` / `cli-macOS` / `cli-Windows` です。
+- [Build CLI](.github/workflows/cli-build.yml): macOS・WindowsのCLIを生成します。両ワークフローのCLI artifact名は `cli-macOS` / `cli-Windows` です。
+- Release作成・依存関係の監査ジョブはUbuntu上で実行します。Linux向けアプリのビルドは行いません。
+- CIでは[deny.toml](deny.toml)で配布対象（Intel Mac・Apple Silicon・Windows x64）を指定し、`cargo deny --locked check advisories`で脆弱性・メンテナンス停止を検査します。ローカルではcargo-denyをインストールして同じコマンドを実行できます。
+- `Cargo.lock`にはTauriのLinux／BSD向けGTK関連依存も含まれますが、配布対象のビルドでは使われず、上記の監査対象にも含まれません。`glib`（RUSTSEC-2024-0429）と`proc-macro-error`（RUSTSEC-2024-0370）の指摘は残っており、修正済みという意味ではありません。個別のアドバイザリを無視する設定は設けていないため、今後サポート対象の依存経路に入れば検出されます。
 - macOSの `.app`・`.dmg`・CLIはad-hoc署名し、CIで署名状態を検証します。
 - インストーラ用ExifToolは [prepare_bundled_exiftool.sh](scripts/prepare_bundled_exiftool.sh) で `crates/gui/src-tauri/resources/bin/<os>/` に配置します。実体は生成物として扱い、Gitには含めません。
 - ExifToolを同梱する場合は、[ライセンス文書](crates/gui/src-tauri/resources/LICENSES/EXIFTOOL_LICENSE.txt) も更新・同梱してください。[verify_exiftool_license.sh](scripts/verify_exiftool_license.sh) で実体とライセンス文書の両方を検証します。

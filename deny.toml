@@ -1,0 +1,14 @@
+[graph]
+# 配布対象だけを監査し、ビルドされない他OS向け依存を対象に含めない。
+targets = [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+]
+
+[advisories]
+# 間接依存の指摘も検出し、個別のアドバイザリは無視しない。
+unmaintained = "all"
+unsound = "all"
+yanked = "deny"
+ignore = []

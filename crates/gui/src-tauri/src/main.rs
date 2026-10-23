@@ -382,12 +382,7 @@ fn resource_rel_path() -> &'static str {
         "resources/bin/macos/exiftool"
     }
 
-    #[cfg(target_os = "linux")]
-    {
-        "resources/bin/linux/exiftool"
-    }
-
-    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
         "resources/bin/exiftool"
     }

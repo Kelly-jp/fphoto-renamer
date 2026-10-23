@@ -5,6 +5,17 @@ on:
   pull_request:
 
 jobs:
+  advisories:
+    name: Dependency advisories (macOS / Windows)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          arguments: --locked
+          command: check advisories
+          rust-version: stable
+
   rust:
     runs-on: ${{ matrix.os }}
     strategy:

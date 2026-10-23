@@ -22,7 +22,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [macos-latest, windows-latest]
 
     steps:
       - name: Checkout
@@ -34,8 +34,8 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
-      - name: "Build CLI (release: Linux/Windows)"
-        if: runner.os != 'macOS'
+      - name: "Build CLI (release: Windows)"
+        if: runner.os == 'Windows'
         run: cargo build -p fphoto-renamer-cli --release --locked
 
       - name: "Build CLI (release: macOS universal)"
@@ -62,18 +62,6 @@ jobs:
         run: |
           set -euo pipefail
           bash scripts/macos_codesign_report.sh artifacts/fphoto-renamer-cli
-
-      - name: Package artifact (Linux)
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p artifacts
-          cp target/release/fphoto-renamer-cli artifacts/fphoto-renamer-cli
-          chmod +x artifacts/fphoto-renamer-cli
-          tar -czf artifacts/fphoto-renamer-cli-linux-x86_64.tar.gz -C artifacts fphoto-renamer-cli
-          rm artifacts/fphoto-renamer-cli
-          ls -la artifacts
 
       - name: Package artifact (macOS)
         if: runner.os == 'macOS'
