@@ -187,7 +187,7 @@ CLIとGUI（Tauri + HTML/CSS/JavaScript）は共通のRust coreを使います�
 - GUI実行環境: macOSはWebKit、WindowsはWebView2 Runtime
 - ExifToolを使う場合: PATHに配置するか、`FPHOTO_EXIFTOOL_PATH` に実行ファイルのパスを設定
 - `.app`・インストーラの生成: Tauri CLI（`cargo install tauri-cli --locked --version '^2.0'`）
-- GUIブラウザUIテスト: Node.js / npm
+- GUIブラウザUIテスト: Node.js 22・24・26のいずれかの最新版とnpm
 
 GUIは同梱ExifToolを自動探索します。ExifToolが見つからない場合は `kamadak-exif` にフォールバックします。
 
