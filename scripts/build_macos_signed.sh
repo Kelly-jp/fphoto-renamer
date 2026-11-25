@@ -19,8 +19,10 @@ if ! command -v cargo >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! cargo tauri --version >/dev/null 2>&1; then
-  echo "cargo tauri not found. Install it with: cargo install tauri-cli --locked --version '^2.0'" >&2
+tauri_cli_version="$(cargo tauri --version 2>/dev/null || true)"
+if ! [[ "$tauri_cli_version" =~ ^tauri-cli\ 2\.([0-9]+)\.[0-9]+$ ]] || (( BASH_REMATCH[1] < 12 )); then
+  echo "Tauri CLI 2.12.0 or later in the 2.x series is required (found: ${tauri_cli_version:-none})." >&2
+  echo "Install it with: cargo install tauri-cli --locked --version '^2.12.0'" >&2
   exit 1
 fi
 

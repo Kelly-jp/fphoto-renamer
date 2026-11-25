@@ -46,10 +46,7 @@ jobs:
 
       - name: Install tauri-cli
         shell: bash
-        run: |
-          if ! cargo tauri --version >/dev/null 2>&1; then
-            cargo install tauri-cli --locked --version "^2.0"
-          fi
+        run: cargo install tauri-cli --locked --version "^2.12.0"
 
       - name: Prepare bundled ExifTool
         shell: bash
