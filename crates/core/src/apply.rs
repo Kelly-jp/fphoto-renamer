@@ -945,7 +945,7 @@ mod tests {
     use crate::config::AppPaths;
     use crate::metadata::{MetadataSource, PhotoMetadata};
     use crate::planner::{RenameCandidate, RenamePlan, RenameStats};
-    use chrono::Local;
+    use jiff::ZonedDateTime;
     use std::collections::HashSet;
     use std::fs;
     #[cfg(unix)]
@@ -957,7 +957,7 @@ mod tests {
     fn sample_metadata(jpg_path: PathBuf) -> PhotoMetadata {
         PhotoMetadata {
             source: MetadataSource::JpgExif,
-            date: Local::now(),
+            date: ZonedDateTime::now(),
             camera_make: Some("FUJIFILM".to_string()),
             camera_model: Some("X-T5".to_string()),
             lens_make: Some("FUJIFILM".to_string()),

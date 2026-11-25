@@ -1,15 +1,12 @@
+use crate::exiftool;
 use crate::metadata::PartialMetadata;
 use anyhow::{anyhow, Context, Result};
-use chrono::{DateTime, Local, NaiveDateTime, TimeZone};
 use exif::{Field, Reader as KamadakReader, Value as ExifValue};
-use exiftool::ExifTool;
 use serde_json::Value as JsonValue;
 use std::fs::File;
 use std::io::BufReader;
-use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::path::Path;
 
-const EXIFTOOL_PATH_ENV: &str = "FPHOTO_EXIFTOOL_PATH";
 const FUJIFILM_MAKER_NOTE_PREFIX: &[u8] = b"FUJIFILM";
 const FUJIFILM_TAG_FILM_MODE: u16 = 0x1401;
 const EXIFTOOL_ARGS: &[&str] = &[
@@ -33,8 +30,6 @@ const EXIFTOOL_ARGS: &[&str] = &[
     "-FilmSimulationName",
     "-PictureMode",
 ];
-
-static EXIFTOOL_INSTANCE: OnceLock<Option<Mutex<ExifTool>>> = OnceLock::new();
 
 pub fn read_exif_metadata(path: &Path) -> Result<PartialMetadata> {
     match read_exif_metadata_with_exiftool(path) {
@@ -67,32 +62,6 @@ fn metadata_has_missing_fields(meta: &PartialMetadata) -> bool {
         || meta.film_sim.is_none()
 }
 
-fn exiftool_instance() -> Option<&'static Mutex<ExifTool>> {
-    EXIFTOOL_INSTANCE.get_or_init(init_exiftool).as_ref()
-}
-
-fn init_exiftool() -> Option<Mutex<ExifTool>> {
-    if let Some(path) = configured_exiftool_path() {
-        if let Ok(exiftool) = ExifTool::with_executable(&path) {
-            return Some(Mutex::new(exiftool));
-        }
-    }
-
-    if let Ok(exiftool) = ExifTool::new() {
-        return Some(Mutex::new(exiftool));
-    }
-
-    None
-}
-
-fn configured_exiftool_path() -> Option<PathBuf> {
-    let raw = std::env::var_os(EXIFTOOL_PATH_ENV)?;
-    if raw.is_empty() {
-        return None;
-    }
-    Some(PathBuf::from(raw))
-}
-
 fn read_exif_metadata_with_exiftool(path: &Path) -> Result<PartialMetadata> {
     let is_dng = path
         .extension()
@@ -104,15 +73,7 @@ fn read_exif_metadata_with_exiftool(path: &Path) -> Result<PartialMetadata> {
     } else {
         "-CameraProfile"
     });
-    let exiftool_mutex = exiftool_instance().ok_or_else(|| anyhow!("ExifTool が利用できません"))?;
-    let json = {
-        let exiftool = exiftool_mutex
-            .lock()
-            .map_err(|_| anyhow!("ExifTool のロック取得に失敗しました"))?;
-        exiftool
-            .json(path, &args)
-            .map_err(|err| anyhow!("ExifTool 取得失敗: {err}"))?
-    };
+    let json = exiftool::read_json(path, &args).context("ExifTool 取得失敗")?;
 
     let date = pick_json_string(
         &json,
@@ -566,32 +527,19 @@ fn map_fujifilm_film_mode(code: u16) -> Option<&'static str> {
     }
 }
 
-fn parse_date(input: &str) -> Option<DateTime<Local>> {
+fn parse_date(input: &str) -> Option<jiff::ZonedDateTime> {
     let normalized = input.trim();
 
-    let candidates = [
-        "%Y:%m:%d %H:%M:%S",
-        "%Y:%m:%d %H:%M:%S%:z",
-        "%Y:%m:%d %H:%M:%S%.f%:z",
-        "%Y-%m-%d %H:%M:%S",
-        "%Y-%m-%dT%H:%M:%S",
-        "%Y-%m-%dT%H:%M:%S%.f",
-        "%Y-%m-%dT%H:%M:%S%:z",
-        "%Y-%m-%dT%H:%M:%S%.f%:z",
-    ];
-
-    for fmt in candidates {
-        if let Ok(dt) = DateTime::parse_from_str(normalized, fmt) {
-            return Some(dt.with_timezone(&Local));
-        }
-        if let Ok(naive) = NaiveDateTime::parse_from_str(normalized, fmt) {
-            if let Some(local) = Local.from_local_datetime(&naive).single() {
-                return Some(local);
-            }
-        }
-    }
-
-    None
+    crate::datetime::parse_local_datetime(
+        normalized,
+        &[
+            "%Y:%m:%d %H:%M:%S",
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%dT%H:%M:%S%.f",
+        ],
+        &["%Y:%m:%d %H:%M:%S%.f", "%Y-%m-%dT%H:%M:%S%.f"],
+        &jiff::tz::TimeZone::system(),
+    )
 }
 
 #[cfg(test)]

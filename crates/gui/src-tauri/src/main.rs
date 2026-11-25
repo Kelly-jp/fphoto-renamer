@@ -1,11 +1,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use chrono::{DateTime, Local, Utc};
 use fphoto_renamer_core::{
     apply_plan_with_options, generate_plan, load_config, render_preview_sample, save_config,
     undo_last, validate_template, ApplyOptions, MetadataSource, PhotoMetadata, PlanOptions,
     RenamePlan,
 };
+use jiff::{tz::TimeZone, Timestamp, ZonedDateTime};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 #[cfg(target_os = "macos")]
@@ -91,7 +91,7 @@ struct ApplyRequest {
 }
 
 struct AppState {
-    launched_at_utc: DateTime<Utc>,
+    launched_at_utc: Timestamp,
 }
 
 #[tauri::command]
@@ -148,7 +148,8 @@ fn render_fixed_sample_cmd(
     state: tauri::State<'_, AppState>,
     request: FixedSampleRequest,
 ) -> Result<String, String> {
-    let metadata = fixed_sample_metadata(state.launched_at_utc.with_timezone(&Local));
+    let metadata =
+        fixed_sample_metadata(state.launched_at_utc.to_zoned_datetime(TimeZone::system()));
     render_preview_sample(
         &request.template,
         request.dedupe_same_maker,
@@ -229,7 +230,7 @@ fn normalize_to_folder_cmd(path: String) -> Result<String, String> {
 fn main() {
     tauri::Builder::default()
         .manage(AppState {
-            launched_at_utc: Utc::now(),
+            launched_at_utc: Timestamp::now(),
         })
         .setup(|app| {
             configure_exiftool_path(app.handle());
@@ -392,7 +393,7 @@ fn default_true() -> bool {
     true
 }
 
-fn fixed_sample_metadata(launched_at: DateTime<Local>) -> PhotoMetadata {
+fn fixed_sample_metadata(launched_at: ZonedDateTime) -> PhotoMetadata {
     PhotoMetadata {
         source: MetadataSource::JpgExif,
         date: launched_at,

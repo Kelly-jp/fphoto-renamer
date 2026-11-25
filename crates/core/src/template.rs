@@ -1,6 +1,4 @@
 use crate::metadata::PhotoMetadata;
-use chrono::Datelike;
-use chrono::Timelike;
 use thiserror::Error;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -194,7 +192,7 @@ fn same_maker(camera_make: Option<&str>, lens_make: Option<&str>) -> bool {
 }
 
 fn format_date(metadata: &PhotoMetadata) -> String {
-    let d = metadata.date;
+    let d = &metadata.date;
     format!(
         "{:04}{:02}{:02}{:02}{:02}{:02}",
         d.year(),
@@ -225,13 +223,13 @@ fn is_disallowed_filename_char(ch: char) -> bool {
 mod tests {
     use super::*;
     use crate::metadata::{MetadataSource, PhotoMetadata};
-    use chrono::Local;
+    use jiff::ZonedDateTime;
     use std::path::PathBuf;
 
     fn metadata() -> PhotoMetadata {
         PhotoMetadata {
             source: MetadataSource::JpgExif,
-            date: Local::now(),
+            date: ZonedDateTime::now(),
             camera_make: Some("FUJIFILM".to_string()),
             camera_model: Some("X-T5".to_string()),
             lens_make: Some("fujifilm".to_string()),

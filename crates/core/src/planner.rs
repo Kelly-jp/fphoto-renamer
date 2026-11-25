@@ -9,7 +9,7 @@ use crate::template::{parse_template, render_template_with_options, TemplatePart
 use crate::xmp_reader::read_xmp_metadata;
 use crate::DEFAULT_TEMPLATE;
 use anyhow::{Context, Result};
-use chrono::{DateTime, Local};
+use jiff::ZonedDateTime;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -572,7 +572,7 @@ fn resolve_metadata(
     jpg_path: &Path,
     recursive: bool,
 ) -> Result<ResolvedMetadata> {
-    let fallback_date = file_modified_to_local(jpg_path).unwrap_or_else(Local::now);
+    let fallback_date = file_modified_to_local(jpg_path).unwrap_or_else(ZonedDateTime::now);
     let original_name = jpg_path
         .file_stem()
         .map(|v| v.to_string_lossy().to_string())
@@ -722,7 +722,7 @@ fn metadata_has_missing_fields(meta: &PartialMetadata) -> bool {
 fn to_photo_metadata(
     partial: PartialMetadata,
     source: MetadataSource,
-    fallback_date: DateTime<Local>,
+    fallback_date: ZonedDateTime,
     original_name: String,
     jpg_path: &Path,
 ) -> PhotoMetadata {
@@ -819,9 +819,9 @@ fn is_hidden(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-fn file_modified_to_local(path: &Path) -> Option<DateTime<Local>> {
+fn file_modified_to_local(path: &Path) -> Option<ZonedDateTime> {
     let time = fs::metadata(path).ok()?.modified().ok()?;
-    Some(DateTime::from(time))
+    ZonedDateTime::try_from(time).ok()
 }
 
 #[cfg(test)]

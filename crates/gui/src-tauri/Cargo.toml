@@ -9,7 +9,7 @@ build = "build.rs"
 tauri-build = { version = "2.7.6", features = [] }
 
 [dependencies]
-chrono.workspace = true
+jiff.workspace = true
 serde.workspace = true
 tauri = { version = "2.12.7", features = ["image-png"] }
 rfd = "0.18.0"
