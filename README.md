@@ -139,6 +139,8 @@ RAW探索先から、JPGと同じベース名のXMP・DNG・RAFを探します�
 
 情報の優先順位は **XMP → RAW EXIF → JPG EXIF** です。上位の情報に欠損があれば、下位の情報で補完します。RAW探索先を指定しない場合はJPGのEXIFを使います。
 
+DNGからフィルムシミュレーションを取得する際は、内蔵XMPの現像プロファイル（`crs:CameraProfile`）が既知のフィルムシミュレーションに対応する場合、その値を撮影時の設定より優先します。
+
 明示したRAWフォルダが存在しない、またはフォルダでない場合はエラーになります。
 
 ## バックアップとContent Credentialsの削除
@@ -185,7 +187,7 @@ CLIとGUI（Tauri + HTML/CSS/JavaScript）は共通のRust coreを使います�
 - GUI実行環境: macOSはWebKit、WindowsはWebView2 Runtime
 - ExifToolを使う場合: PATHに配置するか、`FPHOTO_EXIFTOOL_PATH` に実行ファイルのパスを設定
 - `.app`・インストーラの生成: Tauri CLI（`cargo install tauri-cli --locked --version '^2.0'`）
-- GUIブラウザUIテスト: Node.js / npm
+- GUIブラウザUIテスト: Node.js 22・24・26のいずれかの最新版とnpm
 
 GUIは同梱ExifToolを自動探索します。ExifToolが見つからない場合は `kamadak-exif` にフォールバックします。
 
