@@ -946,21 +946,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "exiftool"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8063e00d39c361c04099fa64dc9ad21514880181f299ea040e5cde0a8c36c0fa"
-dependencies = [
- "chrono",
- "log",
- "serde",
- "serde_json",
- "serde_path_to_error",
- "tempfile",
- "thiserror 2.0.21",
-]
-
-[[package]]
 name = "fastrand"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1065,8 +1050,8 @@ dependencies = [
 name = "fphoto-renamer-gui"
 version = "0.5.6"
 dependencies = [
- "chrono",
  "fphoto_renamer_core",
+ "jiff 1.0.3",
  "rfd",
  "serde",
  "tauri",
@@ -1078,9 +1063,8 @@ name = "fphoto_renamer_core"
 version = "0.5.6"
 dependencies = [
  "anyhow",
- "chrono",
  "directories",
- "exiftool",
+ "jiff 1.0.3",
  "kamadak-exif",
  "rayon",
  "serde",
@@ -3243,17 +3227,6 @@ dependencies = [
  "serde",
  "serde_core",
  "zmij",
-]
-
-[[package]]
-name = "serde_path_to_error"
-version = "0.1.20"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "10a9ff822e371bb5403e391ecd83e182e0e77ba7f6fe0160b795797109d1b457"
-dependencies = [
- "itoa",
- "serde",
- "serde_core",
 ]
 
 [[package]]

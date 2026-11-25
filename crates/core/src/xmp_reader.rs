@@ -1,7 +1,6 @@
 use crate::exif_reader::normalize_film_simulation_from_camera_profile;
 use crate::metadata::PartialMetadata;
 use anyhow::{Context, Result};
-use chrono::{DateTime, Local, NaiveDateTime, TimeZone};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
@@ -349,34 +348,22 @@ fn html_unescape_basic(input: &str) -> String {
         .replace("&apos;", "'")
 }
 
-fn parse_date(input: &str) -> Option<DateTime<Local>> {
-    let candidates = [
-        "%Y:%m:%d %H:%M:%S",
-        "%Y-%m-%d %H:%M:%S",
-        "%Y-%m-%dT%H:%M:%S",
-        "%Y-%m-%dT%H:%M:%S%.f",
-        "%Y-%m-%dT%H:%M:%S%:z",
-        "%Y-%m-%dT%H:%M:%S%.f%:z",
-    ];
-
-    for fmt in candidates {
-        if let Ok(dt) = DateTime::parse_from_str(input, fmt) {
-            return Some(dt.with_timezone(&Local));
-        }
-        if let Ok(naive) = NaiveDateTime::parse_from_str(input, fmt) {
-            if let Some(local) = Local.from_local_datetime(&naive).single() {
-                return Some(local);
-            }
-        }
-    }
-
-    None
+fn parse_date(input: &str) -> Option<jiff::ZonedDateTime> {
+    crate::datetime::parse_local_datetime(
+        input,
+        &[
+            "%Y:%m:%d %H:%M:%S",
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%dT%H:%M:%S%.f",
+        ],
+        &["%Y-%m-%dT%H:%M:%S%.f"],
+        &jiff::tz::TimeZone::system(),
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::read_xmp_metadata;
-    use chrono::{Datelike, Timelike};
     use std::fs;
     use tempfile::tempdir;
 

@@ -186,7 +186,7 @@ CLIとGUI（Tauri + HTML/CSS/JavaScript）は共通のRust coreを使います�
 - Rust stable
 - GUI実行環境: macOSはWebKit、WindowsはWebView2 Runtime
 - ExifToolを使う場合: PATHに配置するか、`FPHOTO_EXIFTOOL_PATH` に実行ファイルのパスを設定
-- `.app`・インストーラの生成: Tauri CLI（`cargo install tauri-cli --locked --version '^2.0'`）
+- `.app`・インストーラの生成には Tauri CLI 2.12.0 以降の 2.x を使用します。インストールや更新は `cargo install tauri-cli --locked --version '^2.12.0'` で行えます。
 - GUIブラウザUIテスト: Node.js 22・24・26のいずれかの最新版とnpm
 
 GUIは同梱ExifToolを自動探索します。ExifToolが見つからない場合は `kamadak-exif` にフォールバックします。
@@ -212,6 +212,8 @@ bash scripts/build_macos_signed.sh
 ```
 
 `.app` は `target/release/bundle/macos/fphoto-renamer.app` に生成されます。既存の生成物の署名には [macos_adhoc_sign.sh](scripts/macos_adhoc_sign.sh)、署名の確認には [macos_codesign_report.sh](scripts/macos_codesign_report.sh) を使います。どちらも対象のパスを引数で指定します。
+
+ad-hoc 署名で Apple の公証用認証情報を設定していない場合、Tauri は `Warn skipping app notarization` を表示します。
 
 ### テスト
 

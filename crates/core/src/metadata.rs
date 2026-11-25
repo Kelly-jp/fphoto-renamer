@@ -1,4 +1,4 @@
-use chrono::{DateTime, Local};
+use jiff::ZonedDateTime;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -14,7 +14,8 @@ pub enum MetadataSource {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PhotoMetadata {
     pub source: MetadataSource,
-    pub date: DateTime<Local>,
+    #[serde(with = "crate::datetime::local_rfc3339")]
+    pub date: ZonedDateTime,
     pub camera_make: Option<String>,
     pub camera_model: Option<String>,
     pub lens_make: Option<String>,
@@ -42,7 +43,7 @@ impl PhotoMetadata {
 
 #[derive(Debug, Clone, Default)]
 pub struct PartialMetadata {
-    pub date: Option<DateTime<Local>>,
+    pub date: Option<ZonedDateTime>,
     pub camera_make: Option<String>,
     pub camera_model: Option<String>,
     pub lens_make: Option<String>,
@@ -53,7 +54,7 @@ pub struct PartialMetadata {
 impl PartialMetadata {
     pub fn merge_missing_from(&mut self, fallback: &PartialMetadata) {
         if self.date.is_none() {
-            self.date = fallback.date;
+            self.date.clone_from(&fallback.date);
         }
         if self.camera_make.is_none() {
             self.camera_make = fallback.camera_make.clone();
@@ -77,14 +78,14 @@ impl PartialMetadata {
 mod tests {
     use super::{PartialMetadata, PhotoMetadata};
     use crate::metadata::MetadataSource;
-    use chrono::Local;
+    use jiff::ZonedDateTime;
     use std::path::PathBuf;
 
     #[test]
     fn normalized_make_trims_and_drops_empty() {
         let mut meta = PhotoMetadata {
             source: MetadataSource::JpgExif,
-            date: Local::now(),
+            date: ZonedDateTime::now(),
             camera_make: Some("  FUJIFILM  ".to_string()),
             camera_model: None,
             lens_make: Some("   ".to_string()),
@@ -102,10 +103,34 @@ mod tests {
     }
 
     #[test]
+    fn photo_metadata_preserves_rfc3339_plan_dates() {
+        let old_json = serde_json::json!({
+            "source": "JpgExif",
+            "date": "2026-02-08T10:20:30.120+09:00",
+            "original_name": "IMG_0001",
+            "jpg_path": "IMG_0001.JPG"
+        });
+        let mut metadata: PhotoMetadata = serde_json::from_value(old_json).unwrap();
+        let timestamp = metadata.date.timestamp();
+        assert_eq!(timestamp.to_string(), "2026-02-08T01:20:30.12Z");
+
+        for (zone, expected) in [
+            (jiff::tz::TimeZone::UTC, "2026-02-08T01:20:30.120Z"),
+            (
+                jiff::tz::TimeZone::get("Asia/Tokyo").unwrap(),
+                "2026-02-08T10:20:30.120+09:00",
+            ),
+        ] {
+            metadata.date = timestamp.to_zoned_datetime(zone);
+            assert_eq!(serde_json::to_value(&metadata).unwrap()["date"], expected);
+        }
+    }
+
+    #[test]
     fn merge_missing_from_only_fills_missing_fields() {
-        let now = Local::now();
+        let now = ZonedDateTime::now();
         let mut base = PartialMetadata {
-            date: Some(now),
+            date: Some(now.clone()),
             camera_make: Some("SONY".to_string()),
             camera_model: None,
             lens_make: None,

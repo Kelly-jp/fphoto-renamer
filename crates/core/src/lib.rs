@@ -1,7 +1,9 @@
 mod apply;
 mod config;
 mod constants;
+mod datetime;
 mod exif_reader;
+mod exiftool;
 mod matcher;
 mod metadata;
 mod planner;
