@@ -20,7 +20,6 @@ const EXIFTOOL_ARGS: &[&str] = &[
     "-Model",
     "-Saturation",
     "-ColorMode",
-    "-CameraProfile",
     "-CameraProfilesProfileName",
     "-LensMake",
     "-LensManufacturer",
@@ -95,13 +94,23 @@ fn configured_exiftool_path() -> Option<PathBuf> {
 }
 
 fn read_exif_metadata_with_exiftool(path: &Path) -> Result<PartialMetadata> {
+    let is_dng = path
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("dng"));
+    let mut args = EXIFTOOL_ARGS.to_vec();
+    // DNG files can also contain an XMP-crd profile for the camera defaults.
+    args.push(if is_dng {
+        "-XMP-crs:CameraProfile"
+    } else {
+        "-CameraProfile"
+    });
     let exiftool_mutex = exiftool_instance().ok_or_else(|| anyhow!("ExifTool が利用できません"))?;
     let json = {
         let exiftool = exiftool_mutex
             .lock()
             .map_err(|_| anyhow!("ExifTool のロック取得に失敗しました"))?;
         exiftool
-            .json(path, EXIFTOOL_ARGS)
+            .json(path, &args)
             .map_err(|err| anyhow!("ExifTool 取得失敗: {err}"))?
     };
 
@@ -123,7 +132,7 @@ fn read_exif_metadata_with_exiftool(path: &Path) -> Result<PartialMetadata> {
             "LensSpecification",
         ],
     );
-    let film_sim = pick_film_simulation_from_json(&json);
+    let film_sim = pick_film_simulation_from_json(&json, is_dng);
 
     Ok(PartialMetadata {
         date,
@@ -163,7 +172,16 @@ fn json_value_to_string(value: &JsonValue) -> Option<String> {
     }
 }
 
-fn pick_film_simulation_from_json(json: &JsonValue) -> Option<String> {
+fn pick_film_simulation_from_json(
+    json: &JsonValue,
+    prefer_development_profile: bool,
+) -> Option<String> {
+    let camera_profile = pick_json_string(json, &["CameraProfile"])
+        .and_then(|raw| normalize_film_simulation_from_camera_profile(&raw));
+    if prefer_development_profile && camera_profile.is_some() {
+        return camera_profile;
+    }
+
     if let Some(raw) = pick_json_string(json, &["Saturation"]) {
         if let Some(mapped) = normalize_film_simulation_from_saturation(&raw) {
             return Some(mapped);
@@ -184,12 +202,11 @@ fn pick_film_simulation_from_json(json: &JsonValue) -> Option<String> {
         }
     }
 
-    for key in ["CameraProfile", "CameraProfilesProfileName"] {
-        if let Some(raw) = pick_json_string(json, &[key]) {
-            if let Some(mapped) = normalize_film_simulation_from_camera_profile(&raw) {
-                return Some(mapped);
-            }
-        }
+    if let Some(profile) = camera_profile.or_else(|| {
+        pick_json_string(json, &["CameraProfilesProfileName"])
+            .and_then(|raw| normalize_film_simulation_from_camera_profile(&raw))
+    }) {
+        return Some(profile);
     }
 
     if let Some(raw) = pick_json_string(json, &["PictureMode"]) {
@@ -667,7 +684,7 @@ mod tests {
             "FilmMode": "F0/Standard (Provia)"
         });
         assert_eq!(
-            pick_film_simulation_from_json(&json).as_deref(),
+            pick_film_simulation_from_json(&json, false).as_deref(),
             Some("ACROS+ R FILTER")
         );
     }
@@ -679,7 +696,7 @@ mod tests {
             "FilmMode": "F0/Standard (Provia)"
         });
         assert_eq!(
-            pick_film_simulation_from_json(&json).as_deref(),
+            pick_film_simulation_from_json(&json, false).as_deref(),
             Some("PROVIA")
         );
     }
@@ -691,7 +708,7 @@ mod tests {
             "CameraProfile": "Camera PROVIA/Standard"
         });
         assert_eq!(
-            pick_film_simulation_from_json(&json).as_deref(),
+            pick_film_simulation_from_json(&json, false).as_deref(),
             Some("PROVIA")
         );
     }
@@ -702,8 +719,36 @@ mod tests {
             "CameraProfile": "Camera ACROS+R Filter"
         });
         assert_eq!(
-            pick_film_simulation_from_json(&json).as_deref(),
+            pick_film_simulation_from_json(&json, false).as_deref(),
             Some("ACROS+ R FILTER")
+        );
+    }
+
+    #[test]
+    fn dng_prefers_development_profile_over_capture_film_mode() {
+        let json = json!({
+            "FilmMode": "Reala ACE",
+            "CameraProfile": "Camera CLASSIC CHROME"
+        });
+        assert_eq!(
+            pick_film_simulation_from_json(&json, true).as_deref(),
+            Some("CLASSIC CHROME")
+        );
+        assert_eq!(
+            pick_film_simulation_from_json(&json, false).as_deref(),
+            Some("REALA ACE")
+        );
+    }
+
+    #[test]
+    fn dng_uses_capture_film_mode_when_profile_is_unrecognized() {
+        let json = json!({
+            "FilmMode": "Reala ACE",
+            "CameraProfile": "Adobe Standard"
+        });
+        assert_eq!(
+            pick_film_simulation_from_json(&json, true).as_deref(),
+            Some("REALA ACE")
         );
     }
 }
